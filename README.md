@@ -1,4 +1,4 @@
-# 🕵️‍♂️ Fake Job Posting Detection & Comparison Dashboard
+# Fake Job Posting Detection & Comparison Dashboard
 
 This project is a machine learning dashboard designed to detect fraudulent job postings. It combines text-based natural language processing (NLP) with structured metadata columns to train multiple classification models, evaluate their performance, and serve interactive predictions via a beautiful dark-themed web interface.
 
@@ -47,7 +47,7 @@ Fk_Jb_Detection project/
 
 ---
 
-## 🚀 Running the Web Dashboard
+## Running the Web Dashboard
 
 1. Run the Flask server in development mode:
    ```bash
