@@ -2,8 +2,11 @@ import os
 import pickle
 import json
 import uuid
+import re
 import numpy as np
 import pandas as pd
+import requests as http_requests
+from bs4 import BeautifulSoup
 from flask import Flask, request, jsonify, render_template, send_file
 from scipy.sparse import hstack, csr_matrix
 
@@ -12,41 +15,26 @@ app = Flask(__name__)
 # Load models and pipeline components on startup
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-print("Loading label encoders, TF-IDF vectorizers, and ML models...")
+print("Loading label encoders, TF-IDF vectorizer, and ML models...")
 try:
     with open(os.path.join(BASE_DIR, "label_encoders.pkl"), "rb") as f:
         label_encoders = pickle.load(f)
     with open(os.path.join(BASE_DIR, "tfidf_vectorizer.pkl"), "rb") as f:
-        tfidf_baseline = pickle.load(f)
-    with open(os.path.join(BASE_DIR, "tfidf_vectorizer_safe.pkl"), "rb") as f:
-        tfidf_robust = pickle.load(f)
+        tfidf_vectorizer = pickle.load(f)
         
-    models = {
-        "baseline": {},
-        "robust": {}
-    }
-    
-    # Load Baseline Models
+    models = {}
     for name in ["logisticregression", "randomforest", "decisiontree"]:
         model_path = os.path.join(BASE_DIR, f"{name}_model.pkl")
         if os.path.exists(model_path):
             with open(model_path, "rb") as f:
-                models["baseline"][name] = pickle.load(f)
-                print(f"Loaded baseline model: {name}")
-                
-    # Load Robust Models
-    for name in ["logisticregression", "randomforest", "decisiontree"]:
-        model_path = os.path.join(BASE_DIR, f"{name}_safe_model.pkl")
-        if os.path.exists(model_path):
-            with open(model_path, "rb") as f:
-                models["robust"][name] = pickle.load(f)
-                print(f"Loaded robust model: {name}")
+                models[name] = pickle.load(f)
+                print(f"Loaded model: {name}")
+
 except Exception as e:
     print(f"Error loading models or vectorizers: {e}")
     label_encoders = {}
-    tfidf_baseline = None
-    tfidf_robust = None
-    models = {"baseline": {}, "robust": {}}
+    tfidf_vectorizer = None
+    models = {}
 
 @app.route("/")
 def index():
@@ -65,77 +53,75 @@ def get_options():
 
 @app.route("/api/metrics", methods=["GET"])
 def get_metrics():
-    """Returns the comparison metrics of all models."""
+    """Returns the performance metrics of trained models."""
     metrics_path = os.path.join(BASE_DIR, "model_metrics.json")
     if os.path.exists(metrics_path):
         with open(metrics_path, "r") as f:
             return jsonify(json.load(f))
     return jsonify({"error": "Metrics file not found"}), 404
 
+def _build_feature_vector(data):
+    """Build the combined feature vector for prediction.
+    
+    Centralizes feature engineering so both manual and scraped
+    predictions use the exact same pipeline — no hardcoded values or target leakages.
+    """
+    # Collect & combine texts
+    job_desc = str(data.get("job_description", "")).strip()
+    requirements = str(data.get("requirements", "")).strip()
+    benefits = str(data.get("benefits", "")).strip()
+    company_prof = str(data.get("company_profile", "")).strip()
+    combined_text = f"{job_desc} {requirements} {benefits} {company_prof}"
+    
+    # NLP TF-IDF Vectorization
+    tfidf_input = tfidf_vectorizer.transform([combined_text])
+    
+    # Structured inputs with safe defaults
+    experience = int(data.get("required_experience_years", 0))
+    open_pos = int(data.get("num_open_positions", 1))
+    telecomm = int(data.get("telecommuting", 0))
+    
+    # Encoding categorical fields with safe fallback
+    def safe_encode(encoder_key, value):
+        if encoder_key not in label_encoders:
+            return 0
+        encoder = label_encoders[encoder_key]
+        val_str = str(value).strip() if value else ""
+        if val_str in encoder.classes_:
+            return encoder.transform([val_str])[0]
+        return 0
+    
+    industry_enc = safe_encode("industry", data.get("industry"))
+    employment_enc = safe_encode("employment_type", data.get("employment_type"))
+    salary_enc = safe_encode("salary_range", data.get("salary_range"))
+    education_enc = safe_encode("education_level", data.get("education_level"))
+    department_enc = safe_encode("department", data.get("department"))
+    job_function_enc = safe_encode("job_function", data.get("job_function"))
+    
+    # Leakage-free structured input array (excludes text_length, is_gmail, and has_logo)
+    structured_input = np.array([[
+        experience, open_pos, telecomm,
+        industry_enc, employment_enc, salary_enc,
+        education_enc, department_enc, job_function_enc
+    ]])
+    
+    # Combine structured & sparse text TF-IDF
+    return hstack([csr_matrix(structured_input), tfidf_input])
+
+
 @app.route("/api/predict", methods=["POST"])
 def predict():
-    """Performs real-time prediction using the selected model and mode."""
+    """Performs real-time prediction using the selected model."""
     data = request.json
-    pipeline_type = data.get("pipeline_type", "robust").lower() # default to robust/safe mode
     selected_model_name = data.get("model", "logisticregression").lower()
     
-    if pipeline_type not in models or selected_model_name not in models[pipeline_type]:
-        return jsonify({"error": f"Model '{selected_model_name}' under '{pipeline_type}' not loaded"}), 400
+    if selected_model_name not in models:
+        return jsonify({"error": f"Model '{selected_model_name}' not loaded"}), 400
     
-    model = models[pipeline_type][selected_model_name]
+    model = models[selected_model_name]
     
     try:
-        # Collect & combine texts
-        job_desc = data.get("job_description", "").strip()
-        requirements = data.get("requirements", "").strip()
-        benefits = data.get("benefits", "").strip()
-        company_prof = data.get("company_profile", "").strip()
-        combined_text = f"{job_desc} {requirements} {benefits} {company_prof}"
-        
-        # Select vectorizer
-        tfidf = tfidf_robust if pipeline_type == "robust" else tfidf_baseline
-        tfidf_input = tfidf.transform([combined_text])
-        
-        # Get structured inputs
-        experience = int(data.get("required_experience_years", 0))
-        has_logo = int(data.get("has_logo", 0))
-        open_pos = int(data.get("num_open_positions", 1))
-        telecomm = int(data.get("telecommuting", 0))
-        
-        # Encoding categorical
-        industry_val = data.get("industry")
-        employment_val = data.get("employment_type")
-        salary_val = data.get("salary_range")
-        education_val = data.get("education_level")
-        department_val = data.get("department")
-        job_function_val = data.get("job_function")
-        
-        industry_enc = label_encoders["industry"].transform([industry_val])[0]
-        employment_enc = label_encoders["employment_type"].transform([employment_val])[0]
-        salary_enc = label_encoders["salary_range"].transform([salary_val])[0]
-        education_enc = label_encoders["education_level"].transform([education_val])[0]
-        department_enc = label_encoders["department"].transform([department_val])[0]
-        job_function_enc = label_encoders["job_function"].transform([job_function_val])[0]
-        
-        if pipeline_type == "baseline":
-            # Baseline includes text_length and is_gmail
-            text_len = int(data.get("text_length", len(combined_text)))
-            is_gmail = int(data.get("is_gmail", 0))
-            structured_input = np.array([[
-                experience, has_logo, open_pos, telecomm, text_len, is_gmail,
-                industry_enc, employment_enc, salary_enc,
-                education_enc, department_enc, job_function_enc
-            ]])
-        else:
-            # Robust excludes text_length and is_gmail (leakages)
-            structured_input = np.array([[
-                experience, has_logo, open_pos, telecomm,
-                industry_enc, employment_enc, salary_enc,
-                education_enc, department_enc, job_function_enc
-            ]])
-        
-        # Combine structured & sparse text TF-IDF
-        input_combined = hstack([csr_matrix(structured_input), tfidf_input])
+        input_combined = _build_feature_vector(data)
         
         # Predict
         prediction = int(model.predict(input_combined)[0])
@@ -153,6 +139,278 @@ def predict():
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
+
+# ==========================================
+# Internshala Web Scraping
+# ==========================================
+
+SCRAPER_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.5",
+}
+
+def _map_stipend_to_salary_range(stipend_text):
+    """Map Internshala stipend text to dataset salary_range categories."""
+    if not stipend_text:
+        return "Not Disclosed"
+    
+    numbers = re.findall(r'[\d,]+', stipend_text.replace(',', ''))
+    if not numbers:
+        return "Not Disclosed"
+    
+    amounts = [int(n) for n in numbers]
+    max_monthly = max(amounts) if amounts else 0
+    annual_inr = max_monthly * 12
+    annual_usd_approx = annual_inr / 83
+    
+    if annual_usd_approx < 40000:
+        return "$40k-$60k"
+    elif annual_usd_approx < 60000:
+        return "$40k-$60k"
+    elif annual_usd_approx < 80000:
+        return "$60k-$80k"
+    elif annual_usd_approx < 100000:
+        return "$80k-$100k"
+    else:
+        return "$80k-$100k"
+
+
+def _map_employment_type(emp_type_text):
+    """Map Internshala employment type to dataset categories."""
+    if not emp_type_text:
+        return "Internship"
+    
+    text_lower = emp_type_text.lower()
+    
+    if "full" in text_lower and "time" in text_lower:
+        return "Full-time"
+    elif "part" in text_lower and "time" in text_lower:
+        return "Part-time"
+    elif "contract" in text_lower:
+        return "Contract"
+    elif "intern" in text_lower:
+        return "Internship"
+    
+    if "employment_type" in label_encoders:
+        for known in label_encoders["employment_type"].classes_:
+            if known.lower() in text_lower or text_lower in known.lower():
+                return known
+    
+    return "Internship"
+
+
+def _map_industry(industry_text):
+    """Map scraped industry to the closest known dataset category."""
+    if not industry_text or "industry" not in label_encoders:
+        return "IT"
+    
+    known = label_encoders["industry"].classes_
+    text_lower = industry_text.lower()
+    
+    for k in known:
+        if k.lower() == text_lower or k.lower() in text_lower or text_lower in k.lower():
+            return k
+    
+    keyword_map = {
+        "IT": ["tech", "software", "computer", "internet", "digital", "saas", "it"],
+        "Finance": ["finance", "banking", "insurance", "fintech", "accounting"],
+        "Healthcare": ["health", "medical", "pharma", "hospital", "biotech"],
+        "Education": ["education", "training", "learning", "academic", "university"],
+        "Marketing": ["marketing", "advertising", "media", "entertainment", "creative"],
+        "Retail": ["retail", "ecommerce", "consumer", "fashion", "food"]
+    }
+    
+    for category, keywords in keyword_map.items():
+        if category in known:
+            for kw in keywords:
+                if kw in text_lower:
+                    return category
+    
+    return known[0]
+
+
+def _scrape_internshala(url):
+    """Scrape job/internship data from an Internshala URL.
+    
+    Extracts JSON-LD structured data or parses HTML directly.
+    """
+    try:
+        resp = http_requests.get(url, headers=SCRAPER_HEADERS, timeout=15)
+        resp.raise_for_status()
+    except http_requests.exceptions.RequestException as e:
+        return None, f"Failed to fetch URL: {str(e)}"
+    
+    soup = BeautifulSoup(resp.text, "html.parser")
+    scraped = {}
+    
+    # JSON-LD structured data
+    json_ld_data = None
+    for script_tag in soup.find_all("script", type="application/ld+json"):
+        try:
+            data = json.loads(script_tag.string)
+            if isinstance(data, dict) and data.get("@type") == "JobPosting":
+                json_ld_data = data
+                break
+            elif isinstance(data, list):
+                for item in data:
+                    if isinstance(item, dict) and item.get("@type") == "JobPosting":
+                        json_ld_data = item
+                        break
+        except (json.JSONDecodeError, TypeError):
+            continue
+    
+    if json_ld_data:
+        scraped["job_title"] = json_ld_data.get("title", "")
+        raw_desc = json_ld_data.get("description", "")
+        desc_soup = BeautifulSoup(raw_desc, "html.parser")
+        scraped["job_description"] = desc_soup.get_text(separator=" ", strip=True)
+        
+        raw_resp = json_ld_data.get("responsibilities", "")
+        resp_soup = BeautifulSoup(raw_resp, "html.parser")
+        scraped["requirements"] = resp_soup.get_text(separator=" ", strip=True)
+        
+        scraped["skills"] = json_ld_data.get("skills", "")
+        scraped["industry_raw"] = json_ld_data.get("industry", "")
+        scraped["employment_type_raw"] = json_ld_data.get("employmentType", "")
+        scraped["num_open_positions"] = json_ld_data.get("totalJobOpenings", 1)
+        
+        org = json_ld_data.get("hiringOrganization", {})
+        scraped["company_name"] = org.get("name", "")
+        scraped["has_logo"] = 1 if org.get("logo") else 0
+        scraped["company_website"] = org.get("sameAs", "")
+        
+        salary_info = json_ld_data.get("baseSalary", {})
+        if salary_info:
+            value = salary_info.get("value", {})
+            min_val = value.get("minValue", "")
+            max_val = value.get("maxValue", "")
+            currency = salary_info.get("currency", "INR")
+            unit = value.get("unitText", "MONTH")
+            scraped["stipend_raw"] = f"{currency} {min_val}-{max_val}/{unit}"
+        
+        about_section = soup.find("div", class_="text-container about_company_text_container")
+        if about_section:
+            scraped["company_profile"] = about_section.get_text(separator=" ", strip=True)
+        else:
+            if "About Company:" in raw_desc:
+                about_part = raw_desc.split("About Company:")[-1]
+                about_soup = BeautifulSoup(about_part, "html.parser")
+                scraped["company_profile"] = about_soup.get_text(separator=" ", strip=True)
+            else:
+                scraped["company_profile"] = f"{scraped['company_name']} is a company."
+    
+    else:
+        title_el = soup.find("h1", class_="heading_title")
+        scraped["job_title"] = title_el.get_text(strip=True) if title_el else ""
+        
+        company_el = soup.find("div", class_="company_name")
+        scraped["company_name"] = company_el.get_text(strip=True) if company_el else ""
+        
+        logo_el = soup.find("div", class_="internship_logo")
+        scraped["has_logo"] = 1 if logo_el and logo_el.find("img") else 0
+        
+        about_section = soup.find("div", class_="internship_details")
+        scraped["job_description"] = about_section.get_text(separator=" ", strip=True) if about_section else ""
+        
+        company_section = soup.find("div", class_="text-container about_company_text_container")
+        scraped["company_profile"] = company_section.get_text(separator=" ", strip=True) if company_section else ""
+        
+        stipend_el = soup.find("span", class_="stipend")
+        scraped["stipend_raw"] = stipend_el.get_text(strip=True) if stipend_el else ""
+        
+        scraped["num_open_positions"] = 1
+        scraped["requirements"] = ""
+        scraped["industry_raw"] = ""
+        scraped["employment_type_raw"] = "INTERN"
+    
+    perks_section = soup.find("div", class_="round_tabs_container")
+    if perks_section:
+        perks = [tag.get_text(strip=True) for tag in perks_section.find_all("div", class_="round_tabs")]
+        scraped["benefits"] = ", ".join(perks) if perks else ""
+    else:
+        scraped["benefits"] = ""
+    
+    return scraped, None
+
+
+@app.route("/api/scrape-internshala", methods=["POST"])
+def scrape_internshala():
+    """Scrape an Internshala URL and predict if the posting is fake."""
+    data = request.json
+    url = data.get("url", "").strip()
+    selected_model_name = data.get("model", "logisticregression").lower()
+    
+    if not url:
+        return jsonify({"error": "No URL provided"}), 400
+    
+    if "internshala.com" not in url:
+        return jsonify({"error": "Please provide a valid Internshala URL"}), 400
+    
+    if selected_model_name not in models:
+        return jsonify({"error": f"Model '{selected_model_name}' not loaded"}), 400
+    
+    model = models[selected_model_name]
+    
+    # Scrape the page
+    scraped, error = _scrape_internshala(url)
+    if error:
+        return jsonify({"error": error}), 400
+    
+    # Map scraped fields to model input format
+    prediction_input = {
+        "job_description": scraped.get("job_description", ""),
+        "requirements": scraped.get("requirements", ""),
+        "benefits": scraped.get("benefits", ""),
+        "company_profile": scraped.get("company_profile", ""),
+        "required_experience_years": 0,
+        "num_open_positions": int(scraped.get("num_open_positions", 1)),
+        "telecommuting": 0,
+        "industry": _map_industry(scraped.get("industry_raw", "")),
+        "employment_type": _map_employment_type(scraped.get("employment_type_raw", "")),
+        "salary_range": _map_stipend_to_salary_range(scraped.get("stipend_raw", "")),
+        "education_level": "Bachelor",
+        "department": _map_industry(scraped.get("industry_raw", "")),
+        "job_function": "Development",
+    }
+    
+    full_text = f"{scraped.get('job_title', '')} {scraped.get('job_description', '')}".lower()
+    if "work from home" in full_text or "wfh" in full_text or "remote" in full_text:
+        prediction_input["telecommuting"] = 1
+    
+    try:
+        input_combined = _build_feature_vector(prediction_input)
+        
+        prediction = int(model.predict(input_combined)[0])
+        probability = model.predict_proba(input_combined)[0].tolist()
+        
+        return jsonify({
+            "prediction": prediction,
+            "probability": {
+                "real": float(probability[0]),
+                "fake": float(probability[1])
+            },
+            "scraped_data": {
+                "job_title": scraped.get("job_title", ""),
+                "company_name": scraped.get("company_name", ""),
+                "job_description": scraped.get("job_description", "")[:500],
+                "company_profile": scraped.get("company_profile", "")[:500],
+                "requirements": scraped.get("requirements", "")[:300],
+                "benefits": scraped.get("benefits", "")[:300],
+                "skills": scraped.get("skills", ""),
+                "stipend": scraped.get("stipend_raw", "Not Disclosed"),
+                "has_logo": scraped.get("has_logo", 0),
+                "num_open_positions": scraped.get("num_open_positions", 1),
+                "industry": prediction_input["industry"],
+                "employment_type": prediction_input["employment_type"],
+            },
+            "status": "success"
+        })
+        
+    except Exception as e:
+        return jsonify({"error": f"Prediction failed: {str(e)}"}), 400
+
+
 @app.route("/api/predict-csv", methods=["POST"])
 def predict_csv():
     """Predicts fake status for job postings uploaded in a CSV file."""
@@ -160,13 +418,12 @@ def predict_csv():
         return jsonify({"error": "No file uploaded"}), 400
         
     file = request.files["file"]
-    pipeline_type = request.form.get("pipeline_type", "robust").lower()
     selected_model_name = request.form.get("model", "logisticregression").lower()
     
-    if pipeline_type not in models or selected_model_name not in models[pipeline_type]:
-        return jsonify({"error": f"Model '{selected_model_name}' under '{pipeline_type}' not loaded"}), 400
+    if selected_model_name not in models:
+        return jsonify({"error": f"Model '{selected_model_name}' not loaded"}), 400
         
-    model = models[pipeline_type][selected_model_name]
+    model = models[selected_model_name]
     
     try:
         df = pd.read_csv(file)
@@ -174,25 +431,18 @@ def predict_csv():
         if len(df) == 0:
             return jsonify({"error": "Uploaded CSV is empty"}), 400
             
-        # Combine text fields
         text_cols = ["job_description", "requirements", "benefits", "company_profile"]
         for col in text_cols:
             if col not in df.columns:
                 df[col] = ""
                 
         combined_text = df[text_cols].fillna("").agg(" ".join, axis=1)
+        tfidf_input = tfidf_vectorizer.transform(combined_text)
         
-        # Select vectorizer
-        tfidf = tfidf_robust if pipeline_type == "robust" else tfidf_baseline
-        tfidf_input = tfidf.transform(combined_text)
-        
-        # Parse structured fields
         experience = df["required_experience_years"].fillna(0).astype(int) if "required_experience_years" in df.columns else pd.Series([0]*len(df))
-        has_logo = df["has_logo"].fillna(0).astype(int) if "has_logo" in df.columns else pd.Series([0]*len(df))
         open_pos = df["num_open_positions"].fillna(1).astype(int) if "num_open_positions" in df.columns else pd.Series([1]*len(df))
         telecomm = df["telecommuting"].fillna(0).astype(int) if "telecommuting" in df.columns else pd.Series([0]*len(df))
         
-        # Safely encode categorical columns
         def safe_encode(encoder, val):
             val_str = str(val).strip() if not pd.isna(val) else ""
             if val_str in encoder.classes_:
@@ -206,25 +456,14 @@ def predict_csv():
         department_enc = df["department"].apply(lambda x: safe_encode(label_encoders["department"], x)) if "department" in df.columns else pd.Series([0]*len(df))
         job_function_enc = df["job_function"].apply(lambda x: safe_encode(label_encoders["job_function"], x)) if "job_function" in df.columns else pd.Series([0]*len(df))
         
-        if pipeline_type == "baseline":
-            is_gmail = df["contact_email"].apply(lambda x: 1 if "gmail" in str(x).lower() else 0) if "contact_email" in df.columns else pd.Series([0]*len(df))
-            text_len = combined_text.apply(len)
-            structured_input = np.column_stack([
-                experience.values, has_logo.values, open_pos.values, telecomm.values,
-                text_len.values, is_gmail.values, industry_enc.values, employment_enc.values,
-                salary_enc.values, education_enc.values, department_enc.values, job_function_enc.values
-            ])
-        else:
-            structured_input = np.column_stack([
-                experience.values, has_logo.values, open_pos.values, telecomm.values,
-                industry_enc.values, employment_enc.values, salary_enc.values,
-                education_enc.values, department_enc.values, job_function_enc.values
-            ])
+        structured_input = np.column_stack([
+            experience.values, open_pos.values, telecomm.values,
+            industry_enc.values, employment_enc.values, salary_enc.values,
+            education_enc.values, department_enc.values, job_function_enc.values
+        ])
         
-        # hstack
         input_combined = hstack([csr_matrix(structured_input), tfidf_input])
         
-        # Predict
         predictions = model.predict(input_combined)
         probabilities = model.predict_proba(input_combined)
         
@@ -232,7 +471,6 @@ def predict_csv():
         df["predicted_class"] = df["predicted_label"].map({0: "REAL", 1: "FAKE"})
         df["confidence_score"] = np.max(probabilities, axis=1)
         
-        # Create temp folder if not exists
         temp_dir = os.path.join(BASE_DIR, "temp_predictions")
         os.makedirs(temp_dir, exist_ok=True)
         
@@ -240,7 +478,6 @@ def predict_csv():
         out_path = os.path.join(temp_dir, f"{file_id}.csv")
         df.to_csv(out_path, index=False)
         
-        # Build preview
         preview_df = df.head(50).copy().fillna("")
         
         return jsonify({
