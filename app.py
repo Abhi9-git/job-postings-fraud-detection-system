@@ -9,6 +9,16 @@ import requests as http_requests
 from bs4 import BeautifulSoup
 from flask import Flask, request, jsonify, render_template, send_file
 from scipy.sparse import hstack, csr_matrix
+from sklearn.metrics import (
+    accuracy_score,
+    confusion_matrix,
+    f1_score,
+    precision_score,
+    recall_score,
+    roc_auc_score,
+    roc_curve,
+)
+from sklearn.model_selection import train_test_split
 
 app = Flask(__name__)
 
@@ -727,6 +737,135 @@ def get_samples():
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+@app.route("/api/evaluation", methods=["GET"])
+def model_evaluation():
+    """Returns confusion matrices + ROC curve points per model for the dashboard.
+
+    Rebuilds the exact 80/20 stratified split used at training time
+    (test_size=0.20, random_state=42) with the *loaded* vectorizers/scaler,
+    so the curves always match the models actually serving predictions.
+    Result is cached in-memory after the first call.
+    """
+    global _eval_cache
+    if "_eval_cache" not in globals():
+        _eval_cache = None
+    if _eval_cache is not None:
+        return jsonify(_eval_cache)
+
+    def _downsample(xs, ys, max_points=120):
+        n = len(xs)
+        if n <= max_points:
+            return [float(v) for v in xs], [float(v) for v in ys]
+        idx = np.linspace(0, n - 1, max_points).astype(int)
+        # always keep first/last points for a proper ROC shape
+        idx[0], idx[-1] = 0, n - 1
+        return [float(xs[i]) for i in idx], [float(ys[i]) for i in idx]
+
+    def _score_block(y_true, y_pred, y_prob):
+        cm = confusion_matrix(y_true, y_pred, labels=[0, 1]).tolist()
+        fpr, tpr, _ = roc_curve(y_true, y_prob)
+        fpr_d, tpr_d = _downsample(fpr, tpr)
+        return {
+            "confusion_matrix": {"labels": ["REAL", "FAKE"], "matrix": cm},
+            "roc": {
+                "fpr": fpr_d,
+                "tpr": tpr_d,
+                "auc": float(roc_auc_score(y_true, y_prob)),
+            },
+            "accuracy": float(accuracy_score(y_true, y_pred)),
+            "precision": float(precision_score(y_true, y_pred, zero_division=0)),
+            "recall": float(recall_score(y_true, y_pred, zero_division=0)),
+            "f1": float(f1_score(y_true, y_pred, zero_division=0)),
+            "n_test": int(len(y_true)),
+        }
+
+    try:
+        out = {}
+
+        # ---- Main pipeline models (CleanData.csv, shared TF-IDF + scaler) ----
+        main_needed = [m for m in ("logisticregression", "decisiontree") if m in models]
+        if main_needed and tfidf_vectorizer is not None:
+            df = pd.read_csv(os.path.join(BASE_DIR, "CleanData.csv"))
+            text_cols = ["job_description", "requirements", "benefits", "company_profile"]
+            for col in text_cols:
+                if col not in df.columns:
+                    df[col] = ""
+            combined = df[text_cols].fillna("").agg(" ".join, axis=1)
+            tfidf_mat = tfidf_vectorizer.transform(combined)
+
+            def _enc(col, val):
+                if col not in label_encoders:
+                    return 0
+                enc = label_encoders[col]
+                s = str(val).strip() if not pd.isna(val) else ""
+                return int(enc.transform([s])[0]) if s in enc.classes_ else 0
+
+            struct = np.column_stack([
+                df["required_experience_years"].fillna(0).astype(int).values
+                if "required_experience_years" in df.columns else np.zeros(len(df)),
+                df["num_open_positions"].fillna(1).astype(int).values
+                if "num_open_positions" in df.columns else np.ones(len(df)),
+                df["telecommuting"].fillna(0).astype(int).values
+                if "telecommuting" in df.columns else np.zeros(len(df)),
+                df["industry"].apply(lambda x: _enc("industry", x)).values
+                if "industry" in df.columns else np.zeros(len(df)),
+                df["employment_type"].apply(lambda x: _enc("employment_type", x)).values
+                if "employment_type" in df.columns else np.zeros(len(df)),
+                df["salary_range"].apply(lambda x: _enc("salary_range", x)).values
+                if "salary_range" in df.columns else np.zeros(len(df)),
+                df["education_level"].apply(lambda x: _enc("education_level", x)).values
+                if "education_level" in df.columns else np.zeros(len(df)),
+                df["department"].apply(lambda x: _enc("department", x)).values
+                if "department" in df.columns else np.zeros(len(df)),
+                df["job_function"].apply(lambda x: _enc("job_function", x)).values
+                if "job_function" in df.columns else np.zeros(len(df)),
+            ]).astype(float)
+            if scaler is not None:
+                struct = scaler.transform(struct)
+            X_all = hstack([csr_matrix(struct), tfidf_mat])
+            y_all = df["is_fake"].astype(int).values
+            # Same split as training scripts
+            idx = np.arange(len(y_all))
+            idx_train, idx_test = train_test_split(
+                idx, test_size=0.20, random_state=42, stratify=y_all
+            )
+            X_test, y_test = X_all[idx_test], y_all[idx_test]
+            for name in main_needed:
+                clf = models[name]
+                y_pred = clf.predict(X_test)
+                y_prob = clf.predict_proba(X_test)[:, 1]
+                out[name] = _score_block(y_test, y_pred, y_prob)
+
+        # ---- GitHub text-only models (github_fakejobs.csv, CountVectorizer) ----
+        gh_needed = [m for m in ("github_rf", "github_dt") if m in models]
+        if gh_needed and github_vectorizer is not None:
+            gh_path = os.path.join(BASE_DIR, "github_fakejobs.csv")
+            if os.path.exists(gh_path):
+                gdf = pd.read_csv(gh_path)
+                if "Unnamed: 0" in gdf.columns:
+                    gdf = gdf.drop(columns=["Unnamed: 0"])
+                if "fraudulent" in gdf.columns and "label" not in gdf.columns:
+                    gdf = gdf.rename(columns={"fraudulent": "label"})
+                texts = gdf["text"].fillna("").astype(str)
+                labels = gdf["label"].astype(int).values
+                X_all_gh = github_vectorizer.transform(texts)
+                idx = np.arange(len(labels))
+                _, idx_test = train_test_split(
+                    idx, test_size=0.20, random_state=42, stratify=labels
+                )
+                X_test_gh, y_test_gh = X_all_gh[idx_test], labels[idx_test]
+                for name in gh_needed:
+                    clf = models[name]
+                    y_pred = clf.predict(X_test_gh)
+                    y_prob = clf.predict_proba(X_test_gh)[:, 1]
+                    out[name] = _score_block(y_test_gh, y_pred, y_prob)
+
+        _eval_cache = out
+        return jsonify(out)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)

@@ -6,7 +6,6 @@ from sklearn.model_selection import train_test_split, cross_val_score, Stratifie
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.feature_extraction import text
 from sklearn.metrics import (
     accuracy_score,
     precision_score,
@@ -46,20 +45,16 @@ structured_cols = [
 scaler = StandardScaler()
 X_struct_scaled = scaler.fit_transform(df[structured_cols])
 
-# Expanded stop words
-custom_stops = [
-    "global", "company", "our company", "we are global",
-    "our", "we are", "are global"
-]
-stop_words = list(text.ENGLISH_STOP_WORDS.union(custom_stops))
-
+# TF-IDF must stay aligned with LogisticRegression_03.py and app.py's shared
+# pipeline (tfidf_vectorizer.pkl). A different config here overwrites the shared
+# vectorizer with an incompatible vocab (e.g. 336 vs 402 terms) and breaks
+# inference with "X has N features, but DecisionTreeClassifier is expecting M".
 tfidf = TfidfVectorizer(
-    max_features=1000,
-    stop_words=stop_words,
+    max_features=500,
+    stop_words="english",
     ngram_range=(1, 2),
-    min_df=2,
-    max_df=0.90,
-    sublinear_tf=True
+    min_df=5,
+    max_df=0.95,
 )
 tfidf_matrix = tfidf.fit_transform(df["combined_text"])
 

@@ -51,53 +51,53 @@
         ]
     },
     "decisiontree": {
-        "accuracy": 0.8883333333333333,
-        "precision": 0.8270893371757925,
-        "recall": 0.9761904761904762,
-        "f1": 0.8954758190327613,
-        "roc_auc": 0.9587334933973589,
-        "cv_accuracy_mean": 0.8949999999999999,
-        "cv_accuracy_std": 0.00823272602348561,
+        "accuracy": 1.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "roc_auc": 1.0,
+        "cv_accuracy_mean": 1.0,
+        "cv_accuracy_std": 0.0,
         "top_features": [
             {
-                "feature": "dynamic growth",
-                "importance": 0.40164372482513555
+                "feature": "global",
+                "importance": 0.999999999999982
             },
             {
-                "feature": "strategy team",
-                "importance": 0.27352704997629734
+                "feature": "collaboration team",
+                "importance": 1.7430501486614765e-14
             },
             {
-                "feature": "team strategy",
-                "importance": 0.18234061887347375
+                "feature": "paced opportunity",
+                "importance": 6.661338147750831e-16
             },
             {
-                "feature": "skills growth",
-                "importance": 0.12839018881074404
+                "feature": "global preferred",
+                "importance": 0.0
             },
             {
-                "feature": "innovation knowledge",
-                "importance": 0.008267074898015904
+                "feature": "global required",
+                "importance": 0.0
             },
             {
-                "feature": "responsibilities preferred",
-                "importance": 0.003079366177376573
+                "feature": "global responsibilities",
+                "importance": 0.0
             },
             {
-                "feature": "strategy development",
-                "importance": 0.0027519764389344202
+                "feature": "global skills",
+                "importance": 0.0
             },
             {
-                "feature": "looking opportunity",
-                "importance": 1.8530295495299918e-14
+                "feature": "global strategy",
+                "importance": 0.0
             },
             {
-                "feature": "required required",
-                "importance": 3.2812499990988536e-15
+                "feature": "global support",
+                "importance": 0.0
             },
             {
-                "feature": "experience team",
-                "importance": 4.721528702988341e-16
+                "feature": "global team",
+                "importance": 0.0
             }
         ]
     },
