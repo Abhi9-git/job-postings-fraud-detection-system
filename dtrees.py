@@ -14,6 +14,14 @@ from sklearn.metrics import (
     roc_auc_score
 )
 from scipy.sparse import hstack, csr_matrix
+from pipeline_config import (
+    CATEGORICAL_COLS,
+    RANDOM_STATE,
+    STRUCTURED_COLS,
+    TEST_SIZE,
+    TEXT_COLS,
+    TFIDF_PARAMS,
+)
 
 print("Starting training of Decision Tree Model Pipeline...")
 
@@ -21,47 +29,40 @@ print("Starting training of Decision Tree Model Pipeline...")
 
 df = pd.read_csv("CleanData.csv")
 
-# Label encoders
+# Label encoders (columns shared with app.py via pipeline_config)
 label_encoders = {}
-categorical_cols = ["industry", "employment_type", "salary_range", "education_level", "department", "job_function"]
+categorical_cols = CATEGORICAL_COLS
 for col in categorical_cols:
     le = LabelEncoder()
     df[col + "_enc"] = le.fit_transform(df[col])
     label_encoders[col] = le
 
 # Text setup
-text_cols = ["job_description", "requirements", "benefits", "company_profile"]
+text_cols = TEXT_COLS
 df["combined_text"] = df[text_cols].apply(lambda row: " ".join(row.values.astype(str)), axis=1)
 
 y = df["is_fake"]
 
-# Leakage-free structured features
-structured_cols = [
-    "required_experience_years", "num_open_positions", "telecommuting",
-    "industry_enc", "employment_type_enc", "salary_range_enc",
-    "education_level_enc", "department_enc", "job_function_enc"
-]
+# Leakage-free structured features (order shared with app.py)
+structured_cols = STRUCTURED_COLS
 
 scaler = StandardScaler()
 X_struct_scaled = scaler.fit_transform(df[structured_cols])
 
-# TF-IDF must stay aligned with LogisticRegression_03.py and app.py's shared
-# pipeline (tfidf_vectorizer.pkl). A different config here overwrites the shared
-# vectorizer with an incompatible vocab (e.g. 336 vs 402 terms) and breaks
-# inference with "X has N features, but DecisionTreeClassifier is expecting M".
-tfidf = TfidfVectorizer(
-    max_features=500,
-    stop_words="english",
-    ngram_range=(1, 2),
-    min_df=5,
-    max_df=0.95,
-)
+# Shared TF-IDF config (see pipeline_config). Do NOT hardcode a different
+# config here: it overwrites the shared tfidf_vectorizer.pkl with an
+# incompatible vocab and breaks inference with "X has N features, but
+# DecisionTreeClassifier is expecting M".
+tfidf = TfidfVectorizer(**TFIDF_PARAMS)
 tfidf_matrix = tfidf.fit_transform(df["combined_text"])
 
 X_combined = hstack([csr_matrix(X_struct_scaled), tfidf_matrix])
+assert X_combined.shape[1] == 9 + len(tfidf.vocabulary_), (
+    f"Unexpected feature width {X_combined.shape[1]}"
+)
 
 X_train, X_test, y_train, y_test = train_test_split(
-    X_combined, y, test_size=0.20, random_state=42, stratify=y
+    X_combined, y, test_size=TEST_SIZE, random_state=RANDOM_STATE, stratify=y
 )
 
 clf = DecisionTreeClassifier(

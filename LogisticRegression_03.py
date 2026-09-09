@@ -9,8 +9,6 @@ features to detect fraudulent job postings.
 # ── Imports ──────────────────────────────────────────────────────────
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
 from sklearn.calibration import CalibratedClassifierCV
@@ -22,10 +20,16 @@ from sklearn.metrics import (
     precision_score,
     recall_score,
     f1_score,
-    confusion_matrix,
     classification_report,
     roc_auc_score,
-    roc_curve,
+)
+from pipeline_config import (
+    CATEGORICAL_COLS,
+    RANDOM_STATE,
+    STRUCTURED_COLS,
+    TEST_SIZE,
+    TEXT_COLS,
+    TFIDF_PARAMS,
 )
 import sys
 import warnings, pickle
@@ -50,16 +54,9 @@ print("=" * 60)
 # Keep the feature schema aligned with app.py so predictions use the same
 # live feature set that was actually trained. This avoids leakage-like
 # dataset-only signals such as text_length and email/logo indicators.
-# Encode categorical columns with LabelEncoder
+# Encode categorical columns with LabelEncoder (shared with app.py)
 label_encoders = {}
-categorical_cols = [
-    "industry",
-    "employment_type",
-    "salary_range",
-    "education_level",
-    "department",
-    "job_function",
-]
+categorical_cols = CATEGORICAL_COLS
 
 for col in categorical_cols:
     le = LabelEncoder()
@@ -67,20 +64,10 @@ for col in categorical_cols:
     label_encoders[col] = le
     print(f"  Encoded  {col:25s}  →  {list(le.classes_)}")
 
-structured_feature_cols = [
-    "required_experience_years",
-    "num_open_positions",
-    "telecommuting",
-    "industry_enc",
-    "employment_type_enc",
-    "salary_range_enc",
-    "education_level_enc",
-    "department_enc",
-    "job_function_enc",
-]
+structured_feature_cols = STRUCTURED_COLS
 
 # ─── 2b. NLP features — TF-IDF on text columns ─────────────────────
-text_cols = ["job_description", "requirements", "benefits", "company_profile"]
+text_cols = TEXT_COLS
 
 # Combine all text columns into a single text feature
 df["combined_text"] = df[text_cols].apply(
@@ -91,14 +78,9 @@ print(f"\n  Text columns combined: {text_cols}")
 print(f"  Sample combined text (first 120 chars):")
 print(f"    \"{df['combined_text'].iloc[0][:120]}...\"\n")
 
-# Fit TF-IDF vectorizer
-tfidf = TfidfVectorizer(
-    max_features=500,       # top 500 terms to keep it manageable
-    stop_words="english",   # remove common English stop words
-    ngram_range=(1, 2),     # unigrams + bigrams
-    min_df=5,               # term must appear in at least 5 docs
-    max_df=0.95,            # ignore terms in > 95% of docs
-)
+# Fit TF-IDF vectorizer (shared config — see pipeline_config; the live
+# dashboard renders ROC/confusion matrices dynamically via /api/evaluation)
+tfidf = TfidfVectorizer(**TFIDF_PARAMS)
 
 tfidf_matrix = tfidf.fit_transform(df["combined_text"])
 print(f"  TF-IDF matrix shape  : {tfidf_matrix.shape}")
@@ -122,7 +104,7 @@ print("  STEP 3 : Train / Test Split  (80-20, stratified)")
 print("=" * 60)
 
 X_train, X_test, y_train, y_test = train_test_split(
-    X_combined, y, test_size=0.20, random_state=42, stratify=y
+    X_combined, y, test_size=TEST_SIZE, random_state=RANDOM_STATE, stratify=y
 )
 print(f"  Training set : {X_train.shape[0]} samples")
 print(f"  Test set     : {X_test.shape[0]} samples\n")
@@ -178,34 +160,8 @@ if hasattr(model, "coef_"):
 else:
     print("Top feature importance is not available for calibrated classifiers; probability calibration is in use.\n")
 
-# ── 5b. Confusion Matrix Plot ───────────────────────────────────────
-cm = confusion_matrix(y_test, y_pred)
-plt.figure(figsize=(6, 5))
-sns.heatmap(cm, annot=True, fmt="d", cmap="Blues",
-            xticklabels=["Real", "Fake"],
-            yticklabels=["Real", "Fake"])
-plt.xlabel("Predicted")
-plt.ylabel("Actual")
-plt.title("Confusion Matrix — Logistic Regression (NLP)")
-plt.tight_layout()
-plt.savefig("confusion_matrix_lr.png", dpi=150)
-plt.show()
-print("  Confusion matrix saved → confusion_matrix_lr.png\n")
-
-# ── 5c. ROC Curve Plot ──────────────────────────────────────────────
-fpr, tpr, _ = roc_curve(y_test, y_prob)
-plt.figure(figsize=(6, 5))
-plt.plot(fpr, tpr, color="darkorange", lw=2,
-         label=f"ROC curve (AUC = {roc_auc:.4f})")
-plt.plot([0, 1], [0, 1], color="gray", linestyle="--")
-plt.xlabel("False Positive Rate")
-plt.ylabel("True Positive Rate")
-plt.title("ROC Curve — Logistic Regression (NLP)")
-plt.legend(loc="lower right")
-plt.tight_layout()
-plt.savefig("roc_curve_lr.png", dpi=150)
-plt.show()
-print("  ROC curve saved → roc_curve_lr.png\n")
+# ── 5b. ROC summary (curves are rendered live in the dashboard) ──────
+print(f"  ROC-AUC on held-out split : {roc_auc:.4f}\n")
 
 # ── 6. Save model + encoders + tfidf ────────────────────────────────
 print("=" * 60)

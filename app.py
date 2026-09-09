@@ -1,13 +1,12 @@
 import os
 import pickle
 import json
-import uuid
 import re
 import numpy as np
 import pandas as pd
 import requests as http_requests
 from bs4 import BeautifulSoup
-from flask import Flask, request, jsonify, render_template, send_file
+from flask import Flask, request, jsonify, render_template
 from scipy.sparse import hstack, csr_matrix
 from sklearn.metrics import (
     accuracy_score,
@@ -19,6 +18,14 @@ from sklearn.metrics import (
     roc_curve,
 )
 from sklearn.model_selection import train_test_split
+
+from pipeline_config import (
+    CATEGORICAL_COLS,
+    RANDOM_STATE,
+    STRUCTURED_COLS,
+    TEST_SIZE,
+    TEXT_COLS,
+)
 
 app = Flask(__name__)
 
@@ -66,6 +73,10 @@ except Exception as e:
     tfidf_vectorizer = None
     scaler = None
     models = {}
+    github_vectorizer = None
+
+# Cached /api/evaluation payload (computed once, datasets are static).
+_eval_cache = None
 
 @app.route("/")
 def index():
@@ -82,15 +93,6 @@ def get_options():
         return jsonify({"error": str(e)}), 500
     return jsonify(options)
 
-@app.route("/api/metrics", methods=["GET"])
-def get_metrics():
-    """Returns the performance metrics of trained models."""
-    metrics_path = os.path.join(BASE_DIR, "model_metrics.json")
-    if os.path.exists(metrics_path):
-        with open(metrics_path, "r") as f:
-            return jsonify(json.load(f))
-    return jsonify({"error": "Metrics file not found"}), 404
-
 def _build_feature_vector(data, selected_model_name=None):
     """Build the combined feature vector for prediction.
     
@@ -99,13 +101,10 @@ def _build_feature_vector(data, selected_model_name=None):
     """
 
     selected_model_name = selected_model_name or data.get("model", "logisticregression").lower()
-    # Collect & combine texts
-    job_desc = str(data.get("job_description", "")).strip()
-    requirements = str(data.get("requirements", "")).strip()
-    benefits = str(data.get("benefits", "")).strip()
-    company_prof = str(data.get("company_profile", "")).strip()
-    combined_text = f"{job_desc} {requirements} {benefits} {company_prof}"
-    
+    # Collect & combine texts (order shared with training via pipeline_config)
+    parts = [str(data.get(col, "") or "").strip() for col in TEXT_COLS]
+    combined_text = " ".join(parts)
+
     # NLP TF-IDF Vectorization
     if selected_model_name in ["github_rf", "github_dt"]:
         if github_vectorizer is None:
@@ -113,13 +112,16 @@ def _build_feature_vector(data, selected_model_name=None):
         text_input = github_vectorizer.transform([combined_text])
         return text_input
 
+    if tfidf_vectorizer is None:
+        raise ValueError("TF-IDF vectorizer is not available")
+
     tfidf_input = tfidf_vectorizer.transform([combined_text])
-    
+
     # Structured inputs with safe defaults
     experience = int(data.get("required_experience_years", 0))
     open_pos = int(data.get("num_open_positions", 1))
     telecomm = int(data.get("telecommuting", 0))
-    
+
     # Encoding categorical fields with safe fallback
     def safe_encode(encoder_key, value):
         if encoder_key not in label_encoders:
@@ -129,55 +131,67 @@ def _build_feature_vector(data, selected_model_name=None):
         if val_str in encoder.classes_:
             return encoder.transform([val_str])[0]
         return 0
-    
-    industry_enc = safe_encode("industry", data.get("industry"))
-    employment_enc = safe_encode("employment_type", data.get("employment_type"))
-    salary_enc = safe_encode("salary_range", data.get("salary_range"))
-    education_enc = safe_encode("education_level", data.get("education_level"))
-    department_enc = safe_encode("department", data.get("department"))
-    job_function_enc = safe_encode("job_function", data.get("job_function"))
-    
+
+    encoded = [safe_encode(col, data.get(col)) for col in CATEGORICAL_COLS]
+
     # Leakage-free structured input array (excludes text_length, is_gmail, and has_logo)
-    structured_input = np.array([[
-        experience, open_pos, telecomm,
-        industry_enc, employment_enc, salary_enc,
-        education_enc, department_enc, job_function_enc
-    ]], dtype=float)
+    structured_input = np.array(
+        [[experience, open_pos, telecomm] + encoded], dtype=float
+    )
+    assert structured_input.shape[1] == len(STRUCTURED_COLS), (
+        f"Structured width {structured_input.shape[1]} != {len(STRUCTURED_COLS)}"
+    )
 
     if scaler is not None:
         structured_input = scaler.transform(structured_input)
-    
+
     # Combine structured & sparse text TF-IDF
     return hstack([csr_matrix(structured_input), tfidf_input])
+
+
+def _predict_with_model(model, input_combined):
+    """Run predict/predict_proba with a feature-width guard.
+
+    Catches vectorizer/model drift (e.g. retraining one model with a
+    different TF-IDF config) and raises a clear error instead of a raw
+    sklearn mismatch deep in the request handler.
+    """
+    expected = getattr(model, "n_features_in_", None)
+    actual = input_combined.shape[1]
+    if expected is not None and actual != expected:
+        raise ValueError(
+            f"Feature mismatch: built {actual} features but model expects "
+            f"{expected}. Retrain the model with the shared pipeline "
+            f"(see pipeline_config.py)."
+        )
+    prediction = int(model.predict(input_combined)[0])
+    probability = model.predict_proba(input_combined)[0].tolist()
+    return prediction, {"real": float(probability[0]), "fake": float(probability[1])}
 
 
 @app.route("/api/predict", methods=["POST"])
 def predict():
     """Performs real-time prediction using the selected model."""
-    data = request.json
-    selected_model_name = data.get("model", "logisticregression").lower()
-    
+    data = request.get_json(silent=True) or {}
+    selected_model_name = str(data.get("model", "logisticregression")).lower()
+
     if selected_model_name not in models:
         return jsonify({"error": f"Model '{selected_model_name}' not loaded"}), 400
-    
+
     model = models[selected_model_name]
-    
+
     try:
         input_combined = _build_feature_vector(data, selected_model_name)
-        
-        # Predict
-        prediction = int(model.predict(input_combined)[0])
-        probability = model.predict_proba(input_combined)[0].tolist()
-        
+
+        # Predict (width-guarded)
+        prediction, probability = _predict_with_model(model, input_combined)
+
         return jsonify({
             "prediction": prediction,
-            "probability": {
-                "real": float(probability[0]),
-                "fake": float(probability[1])
-            },
+            "probability": probability,
             "status": "success"
         })
-        
+
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
@@ -495,9 +509,9 @@ def _scrape_internshala(url):
 @app.route("/api/scrape-internshala", methods=["POST"])
 def scrape_internshala():
     """Scrape an Internshala URL and predict if the posting is fake."""
-    data = request.json
-    url = data.get("url", "").strip()
-    selected_model_name = data.get("model", "logisticregression").lower()
+    data = request.get_json(silent=True) or {}
+    url = str(data.get("url", "")).strip()
+    selected_model_name = str(data.get("model", "logisticregression")).lower()
     
     if not url:
         return jsonify({"error": "No URL provided"}), 400
@@ -538,16 +552,12 @@ def scrape_internshala():
     
     try:
         input_combined = _build_feature_vector(prediction_input, selected_model_name)
-        
-        prediction = int(model.predict(input_combined)[0])
-        probability = model.predict_proba(input_combined)[0].tolist()
-        
+
+        prediction, probability = _predict_with_model(model, input_combined)
+
         return jsonify({
             "prediction": prediction,
-            "probability": {
-                "real": float(probability[0]),
-                "fake": float(probability[1])
-            },
+            "probability": probability,
             "scraped_data": {
                 "job_title": scraped.get("job_title", ""),
                 "company_name": scraped.get("company_name", ""),
@@ -568,107 +578,6 @@ def scrape_internshala():
     except Exception as e:
         return jsonify({"error": f"Prediction failed: {str(e)}"}), 400
 
-
-@app.route("/api/predict-csv", methods=["POST"])
-def predict_csv():
-    """Predicts fake status for job postings uploaded in a CSV file."""
-    if "file" not in request.files:
-        return jsonify({"error": "No file uploaded"}), 400
-        
-    file = request.files["file"]
-    selected_model_name = request.form.get("model", "logisticregression").lower()
-    
-    if selected_model_name not in models:
-        return jsonify({"error": f"Model '{selected_model_name}' not loaded"}), 400
-        
-    model = models[selected_model_name]
-    
-    try:
-        df = pd.read_csv(file)
-        
-        if len(df) == 0:
-            return jsonify({"error": "Uploaded CSV is empty"}), 400
-            
-        text_cols = ["job_description", "requirements", "benefits", "company_profile"]
-        for col in text_cols:
-            if col not in df.columns:
-                df[col] = ""
-
-        combined_text = df[text_cols].fillna("").agg(" ".join, axis=1)
-
-        if selected_model_name in ["github_rf", "github_dt"]:
-            if github_vectorizer is None:
-                return jsonify({"error": "GitHub external vectorizer is not available"}), 400
-            input_combined = github_vectorizer.transform(combined_text)
-        else:
-            tfidf_input = tfidf_vectorizer.transform(combined_text)
-
-            experience = df["required_experience_years"].fillna(0).astype(int) if "required_experience_years" in df.columns else pd.Series([0]*len(df))
-            open_pos = df["num_open_positions"].fillna(1).astype(int) if "num_open_positions" in df.columns else pd.Series([1]*len(df))
-            telecomm = df["telecommuting"].fillna(0).astype(int) if "telecommuting" in df.columns else pd.Series([0]*len(df))
-
-            def safe_encode(encoder, val):
-                val_str = str(val).strip() if not pd.isna(val) else ""
-                if val_str in encoder.classes_:
-                    return encoder.transform([val_str])[0]
-                return 0
-
-            industry_enc = df["industry"].apply(lambda x: safe_encode(label_encoders["industry"], x)) if "industry" in df.columns else pd.Series([0]*len(df))
-            employment_enc = df["employment_type"].apply(lambda x: safe_encode(label_encoders["employment_type"], x)) if "employment_type" in df.columns else pd.Series([0]*len(df))
-            salary_enc = df["salary_range"].apply(lambda x: safe_encode(label_encoders["salary_range"], x)) if "salary_range" in df.columns else pd.Series([0]*len(df))
-            education_enc = df["education_level"].apply(lambda x: safe_encode(label_encoders["education_level"], x)) if "education_level" in df.columns else pd.Series([0]*len(df))
-            department_enc = df["department"].apply(lambda x: safe_encode(label_encoders["department"], x)) if "department" in df.columns else pd.Series([0]*len(df))
-            job_function_enc = df["job_function"].apply(lambda x: safe_encode(label_encoders["job_function"], x)) if "job_function" in df.columns else pd.Series([0]*len(df))
-
-            structured_input = np.column_stack([
-                experience.values, open_pos.values, telecomm.values,
-                industry_enc.values, employment_enc.values, salary_enc.values,
-                education_enc.values, department_enc.values, job_function_enc.values
-            ]).astype(float)
-
-            if scaler is not None:
-                structured_input = scaler.transform(structured_input)
-
-            input_combined = hstack([csr_matrix(structured_input), tfidf_input])
-        
-        predictions = model.predict(input_combined)
-        probabilities = model.predict_proba(input_combined)
-        
-        df["predicted_label"] = predictions
-        df["predicted_class"] = df["predicted_label"].map({0: "REAL", 1: "FAKE"})
-        df["confidence_score"] = np.max(probabilities, axis=1)
-        
-        temp_dir = os.path.join(BASE_DIR, "temp_predictions")
-        os.makedirs(temp_dir, exist_ok=True)
-        
-        file_id = str(uuid.uuid4())
-        out_path = os.path.join(temp_dir, f"{file_id}.csv")
-        df.to_csv(out_path, index=False)
-        
-        preview_df = df.head(50).copy().fillna("")
-        
-        return jsonify({
-            "file_id": file_id,
-            "summary": {
-                "total": len(df),
-                "real": int((predictions == 0).sum()),
-                "fake": int((predictions == 1).sum())
-            },
-            "preview": preview_df.to_dict(orient="records"),
-            "status": "success"
-        })
-        
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route("/api/download-predictions/<file_id>", methods=["GET"])
-def download_predictions(file_id):
-    """Serves the generated prediction output file."""
-    temp_dir = os.path.join(BASE_DIR, "temp_predictions")
-    file_path = os.path.join(temp_dir, f"{file_id}.csv")
-    if os.path.exists(file_path):
-        return send_file(file_path, as_attachment=True, download_name="predicted_job_postings.csv", mimetype="text/csv")
-    return jsonify({"error": "File not found or expired"}), 404
 
 @app.route("/api/dataset-stats", methods=["GET"])
 def dataset_stats():
@@ -742,14 +651,12 @@ def get_samples():
 def model_evaluation():
     """Returns confusion matrices + ROC curve points per model for the dashboard.
 
-    Rebuilds the exact 80/20 stratified split used at training time
-    (test_size=0.20, random_state=42) with the *loaded* vectorizers/scaler,
-    so the curves always match the models actually serving predictions.
+    Rebuilds the shared TEST_SIZE/RANDOM_STATE stratified split from
+    pipeline_config with the *loaded* vectorizers/scaler, so the curves
+    always match the models actually serving predictions.
     Result is cached in-memory after the first call.
     """
     global _eval_cache
-    if "_eval_cache" not in globals():
-        _eval_cache = None
     if _eval_cache is not None:
         return jsonify(_eval_cache)
 
@@ -787,11 +694,10 @@ def model_evaluation():
         main_needed = [m for m in ("logisticregression", "decisiontree") if m in models]
         if main_needed and tfidf_vectorizer is not None:
             df = pd.read_csv(os.path.join(BASE_DIR, "CleanData.csv"))
-            text_cols = ["job_description", "requirements", "benefits", "company_profile"]
-            for col in text_cols:
+            for col in TEXT_COLS:
                 if col not in df.columns:
                     df[col] = ""
-            combined = df[text_cols].fillna("").agg(" ".join, axis=1)
+            combined = df[TEXT_COLS].fillna("").agg(" ".join, axis=1)
             tfidf_mat = tfidf_vectorizer.transform(combined)
 
             def _enc(col, val):
@@ -801,34 +707,29 @@ def model_evaluation():
                 s = str(val).strip() if not pd.isna(val) else ""
                 return int(enc.transform([s])[0]) if s in enc.classes_ else 0
 
-            struct = np.column_stack([
+            numeric = [
                 df["required_experience_years"].fillna(0).astype(int).values
                 if "required_experience_years" in df.columns else np.zeros(len(df)),
                 df["num_open_positions"].fillna(1).astype(int).values
                 if "num_open_positions" in df.columns else np.ones(len(df)),
                 df["telecommuting"].fillna(0).astype(int).values
                 if "telecommuting" in df.columns else np.zeros(len(df)),
-                df["industry"].apply(lambda x: _enc("industry", x)).values
-                if "industry" in df.columns else np.zeros(len(df)),
-                df["employment_type"].apply(lambda x: _enc("employment_type", x)).values
-                if "employment_type" in df.columns else np.zeros(len(df)),
-                df["salary_range"].apply(lambda x: _enc("salary_range", x)).values
-                if "salary_range" in df.columns else np.zeros(len(df)),
-                df["education_level"].apply(lambda x: _enc("education_level", x)).values
-                if "education_level" in df.columns else np.zeros(len(df)),
-                df["department"].apply(lambda x: _enc("department", x)).values
-                if "department" in df.columns else np.zeros(len(df)),
-                df["job_function"].apply(lambda x: _enc("job_function", x)).values
-                if "job_function" in df.columns else np.zeros(len(df)),
-            ]).astype(float)
+            ]
+            encoded = [
+                df[col].apply(lambda x, c=col: _enc(c, x)).values
+                if col in df.columns else np.zeros(len(df))
+                for col in CATEGORICAL_COLS
+            ]
+            struct = np.column_stack(numeric + encoded).astype(float)
             if scaler is not None:
                 struct = scaler.transform(struct)
             X_all = hstack([csr_matrix(struct), tfidf_mat])
             y_all = df["is_fake"].astype(int).values
-            # Same split as training scripts
+            # Same split as the training scripts (see pipeline_config)
             idx = np.arange(len(y_all))
-            idx_train, idx_test = train_test_split(
-                idx, test_size=0.20, random_state=42, stratify=y_all
+            _, idx_test = train_test_split(
+                idx, test_size=TEST_SIZE, random_state=RANDOM_STATE,
+                stratify=y_all,
             )
             X_test, y_test = X_all[idx_test], y_all[idx_test]
             for name in main_needed:
@@ -852,7 +753,8 @@ def model_evaluation():
                 X_all_gh = github_vectorizer.transform(texts)
                 idx = np.arange(len(labels))
                 _, idx_test = train_test_split(
-                    idx, test_size=0.20, random_state=42, stratify=labels
+                    idx, test_size=TEST_SIZE, random_state=RANDOM_STATE,
+                    stratify=labels,
                 )
                 X_test_gh, y_test_gh = X_all_gh[idx_test], labels[idx_test]
                 for name in gh_needed:
