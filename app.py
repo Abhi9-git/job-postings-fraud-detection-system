@@ -15,25 +15,46 @@ app = Flask(__name__)
 # Load models and pipeline components on startup
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-print("Loading label encoders, TF-IDF vectorizer, and ML models...")
+print("Loading label encoders, TF-IDF vectorizer, scaler, and ML models...")
 try:
     with open(os.path.join(BASE_DIR, "label_encoders.pkl"), "rb") as f:
         label_encoders = pickle.load(f)
     with open(os.path.join(BASE_DIR, "tfidf_vectorizer.pkl"), "rb") as f:
         tfidf_vectorizer = pickle.load(f)
+    scaler_path = os.path.join(BASE_DIR, "scaler.pkl")
+    if os.path.exists(scaler_path):
+        with open(scaler_path, "rb") as f:
+            scaler = pickle.load(f)
+    else:
+        scaler = None
         
     models = {}
-    for name in ["logisticregression", "randomforest", "decisiontree"]:
-        model_path = os.path.join(BASE_DIR, f"{name}_model.pkl")
+    model_files = {
+        "logisticregression": "lr_model.pkl",
+        "decisiontree": "dtres_model.pkl",
+        "github_rf": "github_rf_model.pkl",
+        "github_dt": "github_dt_model.pkl"
+    }
+
+    for model_name, file_name in model_files.items():
+        model_path = os.path.join(BASE_DIR, file_name)
         if os.path.exists(model_path):
             with open(model_path, "rb") as f:
-                models[name] = pickle.load(f)
-                print(f"Loaded model: {name}")
+                models[model_name] = pickle.load(f)
+                print(f"Loaded model: {model_name}")
+
+    github_vectorizer_path = os.path.join(BASE_DIR, "github_vectorizer.pkl")
+    if os.path.exists(github_vectorizer_path):
+        with open(github_vectorizer_path, "rb") as f:
+            github_vectorizer = pickle.load(f)
+    else:
+        github_vectorizer = None
 
 except Exception as e:
     print(f"Error loading models or vectorizers: {e}")
     label_encoders = {}
     tfidf_vectorizer = None
+    scaler = None
     models = {}
 
 @app.route("/")
@@ -60,12 +81,14 @@ def get_metrics():
             return jsonify(json.load(f))
     return jsonify({"error": "Metrics file not found"}), 404
 
-def _build_feature_vector(data):
+def _build_feature_vector(data, selected_model_name=None):
     """Build the combined feature vector for prediction.
     
     Centralizes feature engineering so both manual and scraped
     predictions use the exact same pipeline — no hardcoded values or target leakages.
     """
+
+    selected_model_name = selected_model_name or data.get("model", "logisticregression").lower()
     # Collect & combine texts
     job_desc = str(data.get("job_description", "")).strip()
     requirements = str(data.get("requirements", "")).strip()
@@ -74,6 +97,12 @@ def _build_feature_vector(data):
     combined_text = f"{job_desc} {requirements} {benefits} {company_prof}"
     
     # NLP TF-IDF Vectorization
+    if selected_model_name in ["github_rf", "github_dt"]:
+        if github_vectorizer is None:
+            raise ValueError("GitHub external vectorizer is not available")
+        text_input = github_vectorizer.transform([combined_text])
+        return text_input
+
     tfidf_input = tfidf_vectorizer.transform([combined_text])
     
     # Structured inputs with safe defaults
@@ -103,7 +132,10 @@ def _build_feature_vector(data):
         experience, open_pos, telecomm,
         industry_enc, employment_enc, salary_enc,
         education_enc, department_enc, job_function_enc
-    ]])
+    ]], dtype=float)
+
+    if scaler is not None:
+        structured_input = scaler.transform(structured_input)
     
     # Combine structured & sparse text TF-IDF
     return hstack([csr_matrix(structured_input), tfidf_input])
@@ -121,7 +153,7 @@ def predict():
     model = models[selected_model_name]
     
     try:
-        input_combined = _build_feature_vector(data)
+        input_combined = _build_feature_vector(data, selected_model_name)
         
         # Predict
         prediction = int(model.predict(input_combined)[0])
@@ -228,6 +260,122 @@ def _map_industry(industry_text):
                     return category
     
     return known[0]
+
+
+def _infer_required_experience_years(scraped):
+    """Infer experience from Internshala text so scraped data resembles training examples."""
+    text_blob = " ".join([
+        scraped.get("job_title", ""),
+        scraped.get("job_description", ""),
+        scraped.get("requirements", "")
+    ]).lower()
+
+    if any(term in text_blob for term in ["fresher", "freshers", "no experience", "entry level"]):
+        return 0
+
+    patterns = [
+        r"(\d+)\s*(?:-|to)\s*(\d+)\s*years?\s*(?:of\s+)?experience",
+        r"(\d+)\s*\+\s*years?\s*(?:of\s+)?experience",
+        r"experience\s*(?:of\s+)?(\d+)\s*years?",
+        r"(\d+)\s*years?\s*(?:of\s+)?experience"
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, text_blob)
+        if match:
+            numbers = [int(group) for group in match.groups() if group and group.isdigit()]
+            if numbers:
+                return min(max(numbers), 10)
+
+    # fallback for common Internshala phrasing such as "0-1 years"
+    year_matches = re.findall(r"(\d+)\s*years?", text_blob)
+    if year_matches:
+        return min(int(year_matches[0]), 10)
+
+    return 0
+
+
+def _infer_education_level(scraped):
+    """Infer education level from scraped text to match encoder categories."""
+    if "education_level" not in label_encoders:
+        return "Bachelor"
+
+    known = list(label_encoders["education_level"].classes_)
+    text_blob = " ".join([
+        scraped.get("job_title", ""),
+        scraped.get("job_description", ""),
+        scraped.get("requirements", "")
+    ]).lower()
+
+    if any(term in text_blob for term in ["phd", "doctorate"]):
+        return "PhD"
+    if any(term in text_blob for term in ["master", "masters", "graduate degree"]):
+        return "Master"
+    if any(term in text_blob for term in ["bachelor", "degree", "undergraduate", "graduation"]):
+        return "Bachelor"
+    if any(term in text_blob for term in ["12th", "class 12", "school", "high school"]):
+        return "High School"
+
+    return known[0] if known else "Bachelor"
+
+
+def _infer_department(scraped):
+    """Infer department from scraped job text to match training categories."""
+    if "department" not in label_encoders:
+        return "Engineering"
+
+    known = list(label_encoders["department"].classes_)
+    text_blob = " ".join([
+        scraped.get("job_title", ""),
+        scraped.get("job_description", ""),
+        scraped.get("requirements", ""),
+        scraped.get("benefits", "")
+    ]).lower()
+
+    if any(term in text_blob for term in ["design", "ui", "ux", "graphic", "creative"]):
+        return "Design"
+    if any(term in text_blob for term in ["hr", "human resource", "recruitment", "talent"]):
+        return "HR"
+    if any(term in text_blob for term in ["marketing", "content", "social media", "seo", "brand"]):
+        return "Marketing"
+    if any(term in text_blob for term in ["sales", "business development", "client", "account"]):
+        return "Sales"
+    if any(term in text_blob for term in ["software", "developer", "engineer", "python", "java", "data", "product"]):
+        return "Engineering"
+
+    # fallback toward a reasonable department based on industry if nothing matches
+    industry = _map_industry(scraped.get("industry_raw", ""))
+    if industry == "Marketing":
+        return "Marketing"
+    if industry == "Education":
+        return "Engineering"
+    if industry == "Finance":
+        return "Sales"
+
+    return known[0] if known else "Engineering"
+
+
+def _infer_job_function(scraped):
+    """Infer job function from scraped job text to match training categories."""
+    if "job_function" not in label_encoders:
+        return "Development"
+
+    known = list(label_encoders["job_function"].classes_)
+    text_blob = " ".join([
+        scraped.get("job_title", ""),
+        scraped.get("job_description", ""),
+        scraped.get("requirements", "")
+    ]).lower()
+
+    if any(term in text_blob for term in ["analysis", "analyst", "data analyst", "research"]):
+        return "Analysis"
+    if any(term in text_blob for term in ["support", "customer support", "operations", "service"]):
+        return "Support"
+    if any(term in text_blob for term in ["manager", "lead", "head", "team lead"]):
+        return "Management"
+
+    # Most Internshala roles are technical/development-focused unless evidence says otherwise
+    return "Development" if "Development" in known else known[0]
 
 
 def _scrape_internshala(url):
@@ -357,21 +505,21 @@ def scrape_internshala():
     if error:
         return jsonify({"error": error}), 400
     
-    # Map scraped fields to model input format
+    # Map scraped fields to the exact training schema used by the saved models.
     prediction_input = {
         "job_description": scraped.get("job_description", ""),
         "requirements": scraped.get("requirements", ""),
         "benefits": scraped.get("benefits", ""),
         "company_profile": scraped.get("company_profile", ""),
-        "required_experience_years": 0,
+        "required_experience_years": _infer_required_experience_years(scraped),
         "num_open_positions": int(scraped.get("num_open_positions", 1)),
         "telecommuting": 0,
         "industry": _map_industry(scraped.get("industry_raw", "")),
         "employment_type": _map_employment_type(scraped.get("employment_type_raw", "")),
         "salary_range": _map_stipend_to_salary_range(scraped.get("stipend_raw", "")),
-        "education_level": "Bachelor",
-        "department": _map_industry(scraped.get("industry_raw", "")),
-        "job_function": "Development",
+        "education_level": _infer_education_level(scraped),
+        "department": _infer_department(scraped),
+        "job_function": _infer_job_function(scraped),
     }
     
     full_text = f"{scraped.get('job_title', '')} {scraped.get('job_description', '')}".lower()
@@ -379,7 +527,7 @@ def scrape_internshala():
         prediction_input["telecommuting"] = 1
     
     try:
-        input_combined = _build_feature_vector(prediction_input)
+        input_combined = _build_feature_vector(prediction_input, selected_model_name)
         
         prediction = int(model.predict(input_combined)[0])
         probability = model.predict_proba(input_combined)[0].tolist()
@@ -435,34 +583,43 @@ def predict_csv():
         for col in text_cols:
             if col not in df.columns:
                 df[col] = ""
-                
+
         combined_text = df[text_cols].fillna("").agg(" ".join, axis=1)
-        tfidf_input = tfidf_vectorizer.transform(combined_text)
-        
-        experience = df["required_experience_years"].fillna(0).astype(int) if "required_experience_years" in df.columns else pd.Series([0]*len(df))
-        open_pos = df["num_open_positions"].fillna(1).astype(int) if "num_open_positions" in df.columns else pd.Series([1]*len(df))
-        telecomm = df["telecommuting"].fillna(0).astype(int) if "telecommuting" in df.columns else pd.Series([0]*len(df))
-        
-        def safe_encode(encoder, val):
-            val_str = str(val).strip() if not pd.isna(val) else ""
-            if val_str in encoder.classes_:
-                return encoder.transform([val_str])[0]
-            return 0
-            
-        industry_enc = df["industry"].apply(lambda x: safe_encode(label_encoders["industry"], x)) if "industry" in df.columns else pd.Series([0]*len(df))
-        employment_enc = df["employment_type"].apply(lambda x: safe_encode(label_encoders["employment_type"], x)) if "employment_type" in df.columns else pd.Series([0]*len(df))
-        salary_enc = df["salary_range"].apply(lambda x: safe_encode(label_encoders["salary_range"], x)) if "salary_range" in df.columns else pd.Series([0]*len(df))
-        education_enc = df["education_level"].apply(lambda x: safe_encode(label_encoders["education_level"], x)) if "education_level" in df.columns else pd.Series([0]*len(df))
-        department_enc = df["department"].apply(lambda x: safe_encode(label_encoders["department"], x)) if "department" in df.columns else pd.Series([0]*len(df))
-        job_function_enc = df["job_function"].apply(lambda x: safe_encode(label_encoders["job_function"], x)) if "job_function" in df.columns else pd.Series([0]*len(df))
-        
-        structured_input = np.column_stack([
-            experience.values, open_pos.values, telecomm.values,
-            industry_enc.values, employment_enc.values, salary_enc.values,
-            education_enc.values, department_enc.values, job_function_enc.values
-        ])
-        
-        input_combined = hstack([csr_matrix(structured_input), tfidf_input])
+
+        if selected_model_name in ["github_rf", "github_dt"]:
+            if github_vectorizer is None:
+                return jsonify({"error": "GitHub external vectorizer is not available"}), 400
+            input_combined = github_vectorizer.transform(combined_text)
+        else:
+            tfidf_input = tfidf_vectorizer.transform(combined_text)
+
+            experience = df["required_experience_years"].fillna(0).astype(int) if "required_experience_years" in df.columns else pd.Series([0]*len(df))
+            open_pos = df["num_open_positions"].fillna(1).astype(int) if "num_open_positions" in df.columns else pd.Series([1]*len(df))
+            telecomm = df["telecommuting"].fillna(0).astype(int) if "telecommuting" in df.columns else pd.Series([0]*len(df))
+
+            def safe_encode(encoder, val):
+                val_str = str(val).strip() if not pd.isna(val) else ""
+                if val_str in encoder.classes_:
+                    return encoder.transform([val_str])[0]
+                return 0
+
+            industry_enc = df["industry"].apply(lambda x: safe_encode(label_encoders["industry"], x)) if "industry" in df.columns else pd.Series([0]*len(df))
+            employment_enc = df["employment_type"].apply(lambda x: safe_encode(label_encoders["employment_type"], x)) if "employment_type" in df.columns else pd.Series([0]*len(df))
+            salary_enc = df["salary_range"].apply(lambda x: safe_encode(label_encoders["salary_range"], x)) if "salary_range" in df.columns else pd.Series([0]*len(df))
+            education_enc = df["education_level"].apply(lambda x: safe_encode(label_encoders["education_level"], x)) if "education_level" in df.columns else pd.Series([0]*len(df))
+            department_enc = df["department"].apply(lambda x: safe_encode(label_encoders["department"], x)) if "department" in df.columns else pd.Series([0]*len(df))
+            job_function_enc = df["job_function"].apply(lambda x: safe_encode(label_encoders["job_function"], x)) if "job_function" in df.columns else pd.Series([0]*len(df))
+
+            structured_input = np.column_stack([
+                experience.values, open_pos.values, telecomm.values,
+                industry_enc.values, employment_enc.values, salary_enc.values,
+                education_enc.values, department_enc.values, job_function_enc.values
+            ]).astype(float)
+
+            if scaler is not None:
+                structured_input = scaler.transform(structured_input)
+
+            input_combined = hstack([csr_matrix(structured_input), tfidf_input])
         
         predictions = model.predict(input_combined)
         probabilities = model.predict_proba(input_combined)

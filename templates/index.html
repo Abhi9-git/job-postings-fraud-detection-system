@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Fake Job Posting Detection Dashboard</title>
-    <meta name="description" content="An interactive ML dashboard to predict and analyze fraudulent job postings using natural language processing (NLP) and structured metadata features.">
+    <title>FraudGuard Stats Lab</title>
+    <meta name="description" content="A statistics-focused dashboard for analyzing fake job postings, model performance, and prediction confidence using quantitative fraud-detection metrics.">
     <!-- Google Fonts & FontAwesome -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,26 +14,26 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         :root {
-            --bg-gradient: linear-gradient(135deg, #080711 0%, #0f0d2d 100%);
-            --panel-bg: rgba(255, 255, 255, 0.04);
-            --panel-border: rgba(255, 255, 255, 0.08);
-            --panel-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+            --bg-gradient: linear-gradient(135deg, #edf3ff 0%, #f5f7fb 32%, #eef4fb 100%);
+            --panel-bg: rgba(255, 255, 255, 0.8);
+            --panel-border: rgba(92, 120, 170, 0.14);
+            --panel-shadow: 0 16px 42px rgba(27, 39, 68, 0.10);
             
-            --primary: #8b5cf6;
-            --primary-hover: #a78bfa;
-            --primary-glow: rgba(139, 92, 246, 0.4);
+            --primary: #2d5bff;
+            --primary-hover: #1d45c8;
+            --primary-glow: rgba(45, 91, 255, 0.16);
             
-            --accent-cyan: #06b6d4;
-            --accent-pink: #ec4899;
+            --accent-cyan: #0f9dff;
+            --accent-pink: #9b3dff;
             
-            --success: #10b981;
-            --success-glow: rgba(16, 185, 129, 0.3);
-            --danger: #ef4444;
-            --danger-glow: rgba(239, 68, 68, 0.3);
+            --success: #179a63;
+            --success-glow: rgba(23, 154, 99, 0.16);
+            --danger: #d04a4a;
+            --danger-glow: rgba(208, 74, 74, 0.16);
             
-            --text-main: #f3f4f6;
-            --text-muted: #9ca3af;
-            --text-dark: #1f2937;
+            --text-main: #12253f;
+            --text-muted: #58708f;
+            --text-dark: #0e1d2d;
             
             --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         }
@@ -46,7 +46,10 @@
 
         body {
             font-family: 'Outfit', sans-serif;
-            background: var(--bg-gradient);
+            background:
+                radial-gradient(circle at top left, rgba(45, 91, 255, 0.08), transparent 24%),
+                radial-gradient(circle at bottom right, rgba(155, 61, 255, 0.08), transparent 24%),
+                var(--bg-gradient);
             color: var(--text-main);
             min-height: 100vh;
             overflow-x: hidden;
@@ -60,7 +63,7 @@
             backdrop-filter: blur(16px);
             -webkit-backdrop-filter: blur(16px);
             border: 1px solid var(--panel-border);
-            border-radius: 16px;
+            border-radius: 18px;
             box-shadow: var(--panel-shadow);
             padding: 24px;
             transition: var(--transition);
@@ -78,7 +81,7 @@
             justify-content: space-between;
             padding: 20px 40px;
             border-bottom: 1px solid var(--panel-border);
-            background: rgba(8, 7, 17, 0.6);
+            background: rgba(255, 255, 255, 0.72);
             backdrop-filter: blur(12px);
             position: sticky;
             top: 0;
@@ -89,18 +92,15 @@
             display: flex;
             align-items: center;
             gap: 12px;
-            font-size: 1.5rem;
+            font-size: 1.45rem;
             font-weight: 700;
-            background: linear-gradient(90deg, #c084fc, #6366f1);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
+            color: var(--text-main);
         }
 
         .logo i {
-            -webkit-text-fill-color: initial;
             color: var(--primary);
-            font-size: 1.8rem;
-            text-shadow: 0 0 10px var(--primary-glow);
+            font-size: 1.6rem;
+            text-shadow: 0 0 12px var(--primary-glow);
         }
 
         nav {
@@ -129,9 +129,9 @@
         }
 
         .nav-tab.active {
-            color: var(--text-main);
-            background: var(--primary);
-            box-shadow: 0 0 15px var(--primary-glow);
+            color: #ffffff;
+            background: linear-gradient(135deg, var(--primary), var(--accent-cyan));
+            box-shadow: 0 10px 20px var(--primary-glow);
         }
 
         main {
@@ -169,6 +169,34 @@
         }
 
         /* Dashboard/Stats Tab Styles */
+        .page-intro {
+            margin-bottom: 28px;
+            padding: 30px 28px;
+            background: linear-gradient(135deg, rgba(45, 91, 255, 0.06), rgba(15, 157, 255, 0.04));
+        }
+
+        .eyebrow {
+            display: inline-block;
+            font-size: 0.78rem;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            font-weight: 700;
+            color: var(--primary-hover);
+            margin-bottom: 12px;
+        }
+
+        .page-title {
+            font-size: clamp(1.8rem, 3vw, 2.8rem);
+            margin-bottom: 8px;
+            letter-spacing: -0.04em;
+        }
+
+        .page-intro p:last-child {
+            color: var(--text-muted);
+            max-width: 760px;
+            font-size: 1rem;
+        }
+
         .stats-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
@@ -571,19 +599,10 @@
         </div>
         <nav>
             <button class="nav-tab active" onclick="switchTab('dashboard')">
-                <i class="fa-solid fa-chart-line"></i> Dashboard & EDA
+                <i class="fa-solid fa-chart-line"></i> Dashboard
             </button>
             <button class="nav-tab" onclick="switchTab('predictor')">
                 <i class="fa-solid fa-shield-halved"></i> Predictor
-            </button>
-            <button class="nav-tab" onclick="switchTab('comparison')">
-                <i class="fa-solid fa-code-compare"></i> Compare Models
-            </button>
-            <button class="nav-tab" onclick="switchTab('insights')">
-                <i class="fa-solid fa-lightbulb"></i> Insights & Leakages
-            </button>
-            <button class="nav-tab" onclick="switchTab('bulk-predict')">
-                <i class="fa-solid fa-file-csv"></i> Bulk Predict (CSV)
             </button>
         </nav>
     </header>
@@ -591,6 +610,12 @@
     <main>
         <!-- Tab 1: Dashboard & EDA -->
         <div id="dashboard" class="tab-content active">
+            <div class="page-intro glass-card">
+                <div class="eyebrow">Quantitative Fraud Detection</div>
+                <h1 class="page-title">FraudGuard Statistics Lab</h1>
+                <p>Interactive analytics, model diagnostic metrics, and confidence tracking for fake-job posting detection.</p>
+            </div>
+
             <div class="stats-grid">
                 <div class="glass-card stat-card">
                     <div class="stat-info">
@@ -743,8 +768,9 @@
                                     <label for="model_select">Classification Model</label>
                                     <select id="model_select" style="border-color: var(--primary);">
                                         <option value="logisticregression" selected>Logistic Regression</option>
-                                        <option value="randomforest">Random Forest</option>
                                         <option value="decisiontree">Decision Tree</option>
+                                        <option value="github_rf">GitHub Random Forest</option>
+                                        <option value="github_dt">GitHub Decision Tree</option>
                                     </select>
                                 </div>
                             </div>
@@ -845,8 +871,9 @@
                             <label for="scrape_model_select">Classification Model</label>
                             <select id="scrape_model_select" style="border-color: var(--primary);">
                                 <option value="logisticregression" selected>Logistic Regression</option>
-                                <option value="randomforest">Random Forest</option>
                                 <option value="decisiontree">Decision Tree</option>
+                                <option value="github_rf">GitHub Random Forest</option>
+                                <option value="github_dt">GitHub Decision Tree</option>
                             </select>
                         </div>
                     </form>
@@ -914,171 +941,7 @@
             </div>
         </div>
 
-        <!-- Tab 3: Model Comparison -->
-        <div id="comparison" class="tab-content">
-            <div class="comparison-layout">
-                <div class="glass-card">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 15px;">
-                        <h3 style="margin-bottom: 0;"><i class="fa-solid fa-chart-column" style="color: var(--primary);"></i> Multi-Model Performance Comparison</h3>
-                    </div>
-                    <div style="height: 380px; width: 100%; margin-top: 20px;">
-                        <canvas id="comparisonChart"></canvas>
-                    </div>
-                </div>
 
-                <div class="glass-card">
-                    <h3 style="margin-bottom: 20px;"><i class="fa-solid fa-list-check" style="color: var(--primary);"></i> Metrics Summary Table</h3>
-                    <div class="table-container">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>Model Name</th>
-                                    <th>Accuracy</th>
-                                    <th>Precision</th>
-                                    <th>Recall</th>
-                                    <th>F1-Score</th>
-                                    <th>ROC-AUC</th>
-                                    <th>Assessment</th>
-                                </tr>
-                            </thead>
-                            <tbody id="comparisonTableBody">
-                                <!-- Filled by JS -->
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Tab 4: Insights & Warnings -->
-        <div id="insights" class="tab-content">
-            <div class="glass-card insights-doc">
-                <div class="alert-box" style="border-left-color: var(--success); background: rgba(16, 185, 129, 0.1);">
-                    <h4 style="color: #34d399;"><i class="fa-solid fa-shield-check"></i> Leakage-Free ML Architecture</h4>
-                    <p>
-                        FraudGuard AI operates exclusively on a leakage-free machine learning pipeline. Perfect 100% test scores in baseline algorithms were caused by synthetic data artifacts (`has_logo` boolean leaks and rigid synthetic text n-grams). Our final pipeline eliminates all leakages to ensure generalizable fraud detection.
-                    </p>
-                </div>
-
-                <h2>Key Feature Analysis & Real-World Signals</h2>
-                <p>
-                    In our final model pipeline, features are engineered to avoid overfitting on synthetic templates while extracting genuine linguistic and metadata signals:
-                </p>
-
-                <ul>
-                    <li>
-                        <strong>Generic Webmail Domains (<code>is_gmail</code>)</strong>: In real-world recruitment data, authentic job postings rely on verified company domain emails (e.g. <code>hr@company.com</code>), whereas fraudulent postings disproportionately use free webmail addresses (e.g., Gmail).
-                    </li>
-                    <li>
-                        <strong>Filtered Text N-Grams</strong>: Expanded stop-word lists filter out repetitive synthetic phrases (like <em>"our company"</em> or <em>"we are global"</em>), forcing TF-IDF vectorization to focus on underlying structural semantics.
-                    </li>
-                    <li>
-                        <strong>Live Web Scraping Validation</strong>: Real-time scraping of Internshala listings maps live job descriptions directly into our feature vector pipeline for real-world verification.
-                    </li>
-                </ul>
-
-                <h2 style="margin-top: 40px;">Training Methodology & Model Performance</h2>
-                <p>
-                    All models are evaluated using 5-Fold Stratified Cross-Validation (`StratifiedKFold`):
-                </p>
-                <ol style="margin-left: 20px; margin-bottom: 30px;">
-                    <li><strong>TF-IDF Vectorization</strong>: Top 300 n-gram features (unigrams & bigrams) with sublinear term frequency scaling.</li>
-                    <li><strong>Feature Stacking</strong>: Sparse matrix stacking (`scipy.sparse.hstack`) combining NLP features with 9 structured metadata & categorical attributes.</li>
-                    <li><strong>L2 Regularization</strong>: Applied to prevent overfitting on un-generalized vocabulary.</li>
-                </ol>
-            </div>
-        </div>
-
-        <!-- Tab 5: Bulk Predict (CSV) -->
-        <div id="bulk-predict" class="tab-content">
-            <div class="glass-card" style="margin-bottom: 30px;">
-                <h3><i class="fa-solid fa-file-csv" style="color: var(--primary);"></i> Bulk Fraud Detection via CSV Import</h3>
-                <p style="color: var(--text-muted); margin-top: 10px; margin-bottom: 25px; line-height: 1.6;">
-                    Upload a CSV file containing multiple job postings. The system will process them in bulk using the selected classifier and add prediction labels (`predicted_class` - REAL/FAKE) and confidence scores.
-                </p>
-
-                <div class="form-group" style="margin-bottom: 25px;">
-                    <label for="bulk_model_select">Select Classifier Model</label>
-                    <select id="bulk_model_select" style="border-color: var(--primary);">
-                        <option value="logisticregression" selected>Logistic Regression</option>
-                        <option value="randomforest">Random Forest</option>
-                        <option value="decisiontree">Decision Tree</option>
-                    </select>
-                </div>
-
-                <!-- Custom Upload Box -->
-                <div id="uploadBox" class="glass-card" style="border: 2px dashed var(--primary); text-align: center; padding: 40px; cursor: pointer; background: rgba(139, 92, 246, 0.02); transition: var(--transition);" onclick="document.getElementById('csvFileInput').click()">
-                    <input type="file" id="csvFileInput" accept=".csv" style="display: none;" onchange="handleFileSelect(event)">
-                    <i class="fa-solid fa-cloud-arrow-up" style="font-size: 3.5rem; color: var(--primary); margin-bottom: 15px;"></i>
-                    <h4 style="font-size: 1.2rem; margin-bottom: 8px;">Drag and drop your job postings CSV file here</h4>
-                    <p style="color: var(--text-muted); font-size: 0.9rem;">or click to browse local files (max 10MB)</p>
-                    <div id="selectedFileName" style="margin-top: 15px; font-weight: 600; color: var(--primary-hover); display: none;"></div>
-                </div>
-
-                <div id="bulkButtonsBar" style="display: none; justify-content: flex-end; margin-top: 20px;">
-                    <button class="btn" onclick="uploadAndPredictCSV()" style="width: auto; min-width: 200px;">
-                        <i class="fa-solid fa-gear"></i> Run Bulk Analytics
-                    </button>
-                </div>
-            </div>
-
-            <!-- Loading indicator -->
-            <div id="bulkSpinner" style="display: none; text-align: center; padding: 50px;">
-                <div class="spinner" style="display: inline-block;"></div>
-                <h4 style="margin-top: 15px;">Analyzing listings...</h4>
-                <p style="color: var(--text-muted);">Applying TF-IDF vectorization and calculating classification boundaries.</p>
-            </div>
-
-            <!-- Results container -->
-            <div id="bulkResultsContainer" style="display: none;">
-                <!-- Summary cards -->
-                <div class="stats-grid">
-                    <div class="glass-card stat-card">
-                        <div class="stat-info">
-                            <h3>Total Imported</h3>
-                            <p id="bulk-total-count">0</p>
-                        </div>
-                        <i class="fa-solid fa-list stat-icon"></i>
-                    </div>
-                    <div class="glass-card stat-card">
-                        <div class="stat-info">
-                            <h3>Predicted Real</h3>
-                            <p id="bulk-real-count" style="color: var(--success);">0</p>
-                        </div>
-                        <i class="fa-solid fa-circle-check stat-icon" style="color: var(--success);"></i>
-                    </div>
-                    <div class="glass-card stat-card">
-                        <div class="stat-info">
-                            <h3>Predicted Fake</h3>
-                            <p id="bulk-fake-count" style="color: var(--danger);">0</p>
-                        </div>
-                        <i class="fa-solid fa-triangle-exclamation stat-icon" style="color: var(--danger);"></i>
-                    </div>
-                </div>
-
-                <div class="glass-card" style="margin-bottom: 30px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                        <h3><i class="fa-solid fa-table" style="color: var(--primary);"></i> Prediction Preview (First 50 Rows)</h3>
-                        <a id="downloadPredictedCsvBtn" class="btn" style="width: auto; padding: 10px 20px;">
-                            <i class="fa-solid fa-file-arrow-down"></i> Download Fully Predicted CSV
-                        </a>
-                    </div>
-
-                    <div class="table-container">
-                        <table>
-                            <thead>
-                                <tr id="bulkTableHeader">
-                                    <!-- Populated dynamically -->
-                                </tr>
-                            </thead>
-                            <tbody id="bulkTableBody">
-                                <!-- Populated dynamically -->
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-        </div>
     </main>
 
     <footer>
@@ -1559,6 +1422,13 @@
                 const recallData = models.map(m => pipelineData[m].recall);
                 const f1Data = models.map(m => pipelineData[m].f1);
                 const aucData = models.map(m => pipelineData[m].roc_auc);
+                const formatModelLabel = (key) => {
+                    if (key === 'logisticregression') return 'Logistic Regression';
+                    if (key === 'decisiontree') return 'Decision Tree';
+                    if (key === 'github_rf') return 'GitHub Random Forest';
+                    if (key === 'github_dt') return 'GitHub Decision Tree';
+                    return key;
+                };
 
                 // Draw Chart comparison
                 const ctx = document.getElementById('comparisonChart').getContext('2d');
@@ -1568,7 +1438,7 @@
                 charts.comparison = new Chart(ctx, {
                     type: 'bar',
                     data: {
-                        labels: models.map(m => m === 'logisticregression' ? 'Logistic Regression' : (m === 'randomforest' ? 'Random Forest' : 'Decision Tree')),
+                        labels: models.map(formatModelLabel),
                         datasets: [
                             { label: 'Accuracy', data: accuracyData, backgroundColor: 'rgba(139, 92, 246, 0.6)', borderColor: '#8b5cf6', borderWidth: 1 },
                             { label: 'Precision', data: precisionData, backgroundColor: 'rgba(6, 182, 212, 0.6)', borderColor: '#06b6d4', borderWidth: 1 },
@@ -1596,14 +1466,14 @@
                 
                 models.forEach(modelKey => {
                     const metrics = pipelineData[modelKey];
-                    const modelName = modelKey === 'logisticregression' ? 'Logistic Regression' : (modelKey === 'randomforest' ? 'Random Forest' : 'Decision Tree');
+                    const modelName = formatModelLabel(modelKey);
                     
                     const tr = document.createElement('tr');
                     
                     let assessment = '<span class="badge" style="background: rgba(16, 185, 129, 0.1); color: #34d399; border: 1px solid var(--success);">Leakage-Free</span>';
-                    if (modelKey === 'randomforest') {
-                        assessment = '<span class="badge" style="background: rgba(139, 92, 246, 0.1); color: #c084fc; border: 1px solid var(--primary);">High N-Gram Fit</span>';
-                    } else if (modelKey === 'decisiontree') {
+                    if (modelKey === 'github_rf') {
+                        assessment = '<span class="badge" style="background: rgba(139, 92, 246, 0.1); color: #c084fc; border: 1px solid var(--primary);">GitHub Text Model</span>';
+                    } else if (modelKey === 'github_dt' || modelKey === 'decisiontree') {
                         assessment = '<span class="badge" style="background: rgba(6, 182, 212, 0.1); color: #38bdf8; border: 1px solid var(--accent-cyan);">Tree Rules</span>';
                     }
 

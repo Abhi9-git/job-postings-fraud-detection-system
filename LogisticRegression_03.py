@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
+from sklearn.calibration import CalibratedClassifierCV
 from sklearn.preprocessing import LabelEncoder
 from sklearn.feature_extraction.text import TfidfVectorizer
 from scipy.sparse import hstack
@@ -26,6 +27,7 @@ from sklearn.metrics import (
     roc_auc_score,
     roc_curve,
 )
+import sys
 import warnings, pickle
 
 warnings.filterwarnings("ignore")
@@ -45,11 +47,9 @@ print("  STEP 2 : Feature Engineering (Structured + NLP)")
 print("=" * 60)
 
 # ─── 2a. Structured features ────────────────────────────────────────
-# Email domain — gmail vs company  (strong signal from EDA)
-df["is_gmail"] = df["contact_email"].apply(
-    lambda x: 1 if "gmail" in str(x).lower() else 0
-)
-
+# Keep the feature schema aligned with app.py so predictions use the same
+# live feature set that was actually trained. This avoids leakage-like
+# dataset-only signals such as text_length and email/logo indicators.
 # Encode categorical columns with LabelEncoder
 label_encoders = {}
 categorical_cols = [
@@ -69,11 +69,8 @@ for col in categorical_cols:
 
 structured_feature_cols = [
     "required_experience_years",
-    "has_logo",
     "num_open_positions",
     "telecommuting",
-    "text_length",
-    "is_gmail",
     "industry_enc",
     "employment_type_enc",
     "salary_range_enc",
@@ -135,9 +132,14 @@ print("=" * 60)
 print("  STEP 4 : Fitting Logistic Regression Model (with NLP)")
 print("=" * 60)
 
-model = LogisticRegression(max_iter=1000, random_state=42, C=1.0)
+base_lr = LogisticRegression(max_iter=1000, random_state=42, C=0.5)
+model = CalibratedClassifierCV(
+    estimator=base_lr,
+    method="sigmoid",
+    cv=5,
+)
 model.fit(X_train, y_train)
-print("  Model trained successfully ✓\n")
+print("  Calibrated logistic regression model trained successfully ✓\n")
 
 # ── 5. Evaluation ───────────────────────────────────────────────────
 print("=" * 60)
@@ -164,14 +166,17 @@ print(classification_report(y_test, y_pred, target_names=["Real (0)", "Fake (1)"
 
 # ── 5a. Top NLP Feature Importance ──────────────────────────────────
 feature_names = structured_feature_cols + tfidf.get_feature_names_out().tolist()
-coef_df = pd.DataFrame({
-    "Feature": feature_names,
-    "Coefficient": model.coef_[0],
-}).sort_values("Coefficient", key=abs, ascending=False)
+if hasattr(model, "coef_"):
+    coef_df = pd.DataFrame({
+        "Feature": feature_names,
+        "Coefficient": model.coef_[0],
+    }).sort_values("Coefficient", key=abs, ascending=False)
 
-print("Top 20 Most Important Features (by |coefficient|):")
-print(coef_df.head(20).to_string(index=False))
-print()
+    print("Top 20 Most Important Features (by |coefficient|):")
+    print(coef_df.head(20).to_string(index=False))
+    print()
+else:
+    print("Top feature importance is not available for calibrated classifiers; probability calibration is in use.\n")
 
 # ── 5b. Confusion Matrix Plot ───────────────────────────────────────
 cm = confusion_matrix(y_test, y_pred)
@@ -240,13 +245,8 @@ def predict_job_posting():
     # ── Collect STRUCTURED inputs ────────────────────────────────────
     print("\n── STRUCTURED FIELDS ──")
     experience = int(input("Required experience (years, e.g. 5) : "))
-    has_logo   = int(input("Company has logo?  (1=Yes, 0=No)    : "))
     open_pos   = int(input("Number of open positions (e.g. 3)   : "))
     telecomm   = int(input("Telecommuting?     (1=Yes, 0=No)    : "))
-    text_len   = int(input("Text length of posting  (e.g. 89)   : "))
-
-    email_type = input("Contact email domain (gmail / company) : ").strip().lower()
-    is_gmail   = 1 if email_type == "gmail" else 0
 
     # Categorical inputs
     def ask_categorical(col_name, le):
@@ -264,9 +264,9 @@ def predict_job_posting():
     job_function_enc = ask_categorical("job_function", label_encoders["job_function"])
 
     # ── Build combined feature vector ────────────────────────────────
-    # Structured part
+    # Structured part must match the live feature schema used in app.py
     structured_input = np.array([[
-        experience, has_logo, open_pos, telecomm, text_len, is_gmail,
+        experience, open_pos, telecomm,
         industry_enc, employment_enc, salary_enc,
         education_enc, department_enc, job_function_enc,
     ]])
@@ -294,9 +294,12 @@ def predict_job_posting():
 
 # ── 7. Run Prediction System ────────────────────────────────────────
 if __name__ == "__main__":
-    while True:
-        predict_job_posting()
-        again = input("\nPredict another? (y/n): ").strip().lower()
-        if again != "y":
-            print("\nGoodbye! 👋")
-            break
+    if "--skip-predict" in sys.argv:
+        print("\nTraining complete. Skipped interactive prediction mode.\n")
+    else:
+        while True:
+            predict_job_posting()
+            again = input("\nPredict another? (y/n): ").strip().lower()
+            if again != "y":
+                print("\nGoodbye! 👋")
+                break

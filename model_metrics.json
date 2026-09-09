@@ -1,154 +1,205 @@
 {
     "logisticregression": {
-        "accuracy": 0.9616666666666667,
-        "precision": 0.9721254355400697,
-        "recall": 0.9489795918367347,
-        "f1": 0.9604130808950087,
-        "roc_auc": 0.9940976390556222,
-        "cv_accuracy_mean": 0.9496666666666667,
-        "cv_accuracy_std": 0.01262273081917433,
-        "top_features": [
-            {
-                "feature": "skills development",
-                "importance": 0.5786058700109847
-            },
-            {
-                "feature": "opportunity experience",
-                "importance": 0.5576279876297435
-            },
-            {
-                "feature": "experience collaboration",
-                "importance": 0.5363493678134595
-            },
-            {
-                "feature": "experience experience",
-                "importance": 0.5203249867903765
-            },
-            {
-                "feature": "collaboration responsibilities",
-                "importance": 0.5103068046596326
-            },
-            {
-                "feature": "growth growth",
-                "importance": 0.5012426442598807
-            },
-            {
-                "feature": "innovation fast",
-                "importance": 0.49760044776054074
-            },
-            {
-                "feature": "paced innovation",
-                "importance": 0.49546866442576565
-            },
-            {
-                "feature": "knowledge experience",
-                "importance": 0.4950074873278678
-            },
-            {
-                "feature": "collaboration team",
-                "importance": 0.4855720784022667
-            }
-        ]
-    },
-    "randomforest": {
         "accuracy": 1.0,
         "precision": 1.0,
         "recall": 1.0,
         "f1": 1.0,
         "roc_auc": 1.0,
-        "cv_accuracy_mean": 1.0,
-        "cv_accuracy_std": 0.0,
+        "cv_accuracy_mean": 0.9996666666666666,
+        "cv_accuracy_std": 0.000666666666666682,
         "top_features": [
             {
-                "feature": "dynamic growth",
-                "importance": 0.02186084665703477
+                "feature": "skills development",
+                "importance": 2.151933516238127
             },
             {
-                "feature": "responsibilities support",
-                "importance": 0.021297978486282676
+                "feature": "opportunity experience",
+                "importance": 2.1339580189998983
             },
             {
-                "feature": "opportunity fast",
-                "importance": 0.01994277117060051
+                "feature": "growth growth",
+                "importance": 2.0663506126335123
             },
             {
-                "feature": "growth opportunity",
-                "importance": 0.016628991734266057
+                "feature": "experience collaboration",
+                "importance": 2.053492503276792
             },
             {
-                "feature": "required knowledge",
-                "importance": 0.01645240094815827
+                "feature": "experience experience",
+                "importance": 2.048933263627192
             },
             {
-                "feature": "knowledge growth",
-                "importance": 0.01514590477207638
+                "feature": "paced innovation",
+                "importance": 2.0325492425540057
             },
             {
-                "feature": "skills support",
-                "importance": 0.014842564536372912
+                "feature": "development innovation",
+                "importance": 2.0093485753172873
             },
             {
-                "feature": "team required",
-                "importance": 0.01382914869869751
+                "feature": "collaboration responsibilities",
+                "importance": 1.9953094469670962
             },
             {
-                "feature": "preferred development",
-                "importance": 0.012748911768823649
+                "feature": "opportunity collaboration",
+                "importance": 1.9878497608513677
             },
             {
-                "feature": "team strategy",
-                "importance": 0.012730385914078952
+                "feature": "skills innovation",
+                "importance": 1.9668814933229724
             }
         ]
     },
     "decisiontree": {
-        "accuracy": 0.7583333333333333,
-        "precision": 0.9116022099447514,
-        "recall": 0.5612244897959183,
-        "f1": 0.6947368421052632,
-        "roc_auc": 0.8901449468676359,
-        "cv_accuracy_mean": 0.7533333333333333,
-        "cv_accuracy_std": 0.009128709291752779,
+        "accuracy": 0.8883333333333333,
+        "precision": 0.8270893371757925,
+        "recall": 0.9761904761904762,
+        "f1": 0.8954758190327613,
+        "roc_auc": 0.9587334933973589,
+        "cv_accuracy_mean": 0.8949999999999999,
+        "cv_accuracy_std": 0.00823272602348561,
         "top_features": [
             {
                 "feature": "dynamic growth",
-                "importance": 0.5508469973707713
+                "importance": 0.40164372482513555
             },
             {
                 "feature": "strategy team",
-                "importance": 0.3723711978191452
+                "importance": 0.27352704997629734
             },
             {
                 "feature": "team strategy",
-                "importance": 0.0766265782461313
+                "importance": 0.18234061887347375
             },
             {
-                "feature": "skills dynamic",
-                "importance": 0.00015522656395236607
+                "feature": "skills growth",
+                "importance": 0.12839018881074404
             },
             {
-                "feature": "growth support",
-                "importance": 0.0
+                "feature": "innovation knowledge",
+                "importance": 0.008267074898015904
             },
             {
-                "feature": "growth team",
-                "importance": 0.0
+                "feature": "responsibilities preferred",
+                "importance": 0.003079366177376573
             },
             {
-                "feature": "innovation collaboration",
-                "importance": 0.0
+                "feature": "strategy development",
+                "importance": 0.0027519764389344202
             },
             {
-                "feature": "innovation development",
-                "importance": 0.0
+                "feature": "looking opportunity",
+                "importance": 1.8530295495299918e-14
             },
             {
-                "feature": "innovation dynamic",
-                "importance": 0.0
+                "feature": "required required",
+                "importance": 3.2812499990988536e-15
             },
             {
-                "feature": "innovation experience",
-                "importance": 0.0
+                "feature": "experience team",
+                "importance": 4.721528702988341e-16
+            }
+        ]
+    },
+    "github_rf": {
+        "accuracy": 0.9164265129682997,
+        "precision": 0.9,
+        "recall": 0.9364161849710982,
+        "f1": 0.9178470254957507,
+        "roc_auc": 0.9781243771177994,
+        "cv_accuracy_mean": 0.9105012410254701,
+        "cv_accuracy_std": 0.006670095239422381,
+        "top_features": [
+            {
+                "feature": "growing",
+                "importance": 0.006780058301207044
+            },
+            {
+                "feature": "passionate",
+                "importance": 0.005933499889713939
+            },
+            {
+                "feature": "team",
+                "importance": 0.005000407257055707
+            },
+            {
+                "feature": "data entry",
+                "importance": 0.004138575622818852
+            },
+            {
+                "feature": "creative",
+                "importance": 0.003873042471524521
+            },
+            {
+                "feature": "mobile",
+                "importance": 0.0038373044471887176
+            },
+            {
+                "feature": "english",
+                "importance": 0.0033668270464002085
+            },
+            {
+                "feature": "web",
+                "importance": 0.003273258870572584
+            },
+            {
+                "feature": "work home",
+                "importance": 0.0032212219881174856
+            },
+            {
+                "feature": "companies",
+                "importance": 0.0031829629142393484
+            }
+        ]
+    },
+    "github_dt": {
+        "accuracy": 0.8011527377521613,
+        "precision": 0.7385321100917431,
+        "recall": 0.930635838150289,
+        "f1": 0.8235294117647058,
+        "roc_auc": 0.8206763670188028,
+        "cv_accuracy_mean": 0.7754027086005564,
+        "cv_accuracy_std": 0.024973818111916606,
+        "top_features": [
+            {
+                "feature": "passionate",
+                "importance": 0.17793222356325414
+            },
+            {
+                "feature": "secure",
+                "importance": 0.12394654417059542
+            },
+            {
+                "feature": "growing",
+                "importance": 0.11705469541294469
+            },
+            {
+                "feature": "web",
+                "importance": 0.08950642570842854
+            },
+            {
+                "feature": "leveraging",
+                "importance": 0.07785559029064398
+            },
+            {
+                "feature": "search",
+                "importance": 0.0752929678080354
+            },
+            {
+                "feature": "fun",
+                "importance": 0.04918059083221286
+            },
+            {
+                "feature": "recruitment",
+                "importance": 0.043958764151151915
+            },
+            {
+                "feature": "inspire",
+                "importance": 0.04142409568030613
+            },
+            {
+                "feature": "sense urgency",
+                "importance": 0.028995386666945445
             }
         ]
     }
