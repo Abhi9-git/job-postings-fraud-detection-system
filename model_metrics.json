@@ -1,48 +1,155 @@
 {
-    "baseline": {
-        "logisticregression": {
-            "accuracy": 1.0,
-            "precision": 1.0,
-            "recall": 1.0,
-            "f1": 1.0,
-            "roc_auc": 1.0
-        },
-        "randomforest": {
-            "accuracy": 1.0,
-            "precision": 1.0,
-            "recall": 1.0,
-            "f1": 1.0,
-            "roc_auc": 1.0
-        },
-        "decisiontree": {
-            "accuracy": 1.0,
-            "precision": 1.0,
-            "recall": 1.0,
-            "f1": 1.0,
-            "roc_auc": 1.0
-        }
+    "logisticregression": {
+        "accuracy": 0.9616666666666667,
+        "precision": 0.9721254355400697,
+        "recall": 0.9489795918367347,
+        "f1": 0.9604130808950087,
+        "roc_auc": 0.9940976390556222,
+        "cv_accuracy_mean": 0.9496666666666667,
+        "cv_accuracy_std": 0.01262273081917433,
+        "top_features": [
+            {
+                "feature": "skills development",
+                "importance": 0.5786058700109847
+            },
+            {
+                "feature": "opportunity experience",
+                "importance": 0.5576279876297435
+            },
+            {
+                "feature": "experience collaboration",
+                "importance": 0.5363493678134595
+            },
+            {
+                "feature": "experience experience",
+                "importance": 0.5203249867903765
+            },
+            {
+                "feature": "collaboration responsibilities",
+                "importance": 0.5103068046596326
+            },
+            {
+                "feature": "growth growth",
+                "importance": 0.5012426442598807
+            },
+            {
+                "feature": "innovation fast",
+                "importance": 0.49760044776054074
+            },
+            {
+                "feature": "paced innovation",
+                "importance": 0.49546866442576565
+            },
+            {
+                "feature": "knowledge experience",
+                "importance": 0.4950074873278678
+            },
+            {
+                "feature": "collaboration team",
+                "importance": 0.4855720784022667
+            }
+        ]
     },
-    "robust": {
-        "logisticregression": {
-            "accuracy": 0.9683333333333334,
-            "precision": 0.939297124600639,
-            "recall": 1.0,
-            "f1": 0.9686985172981878,
-            "roc_auc": 0.999988884442666
-        },
-        "randomforest": {
-            "accuracy": 1.0,
-            "precision": 1.0,
-            "recall": 1.0,
-            "f1": 1.0,
-            "roc_auc": 1.0
-        },
-        "decisiontree": {
-            "accuracy": 0.9216666666666666,
-            "precision": 0.8643067846607669,
-            "recall": 0.9965986394557823,
-            "f1": 0.9257503949447078,
-            "roc_auc": 0.9651527277577697
-        }
+    "randomforest": {
+        "accuracy": 1.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "roc_auc": 1.0,
+        "cv_accuracy_mean": 1.0,
+        "cv_accuracy_std": 0.0,
+        "top_features": [
+            {
+                "feature": "dynamic growth",
+                "importance": 0.02186084665703477
+            },
+            {
+                "feature": "responsibilities support",
+                "importance": 0.021297978486282676
+            },
+            {
+                "feature": "opportunity fast",
+                "importance": 0.01994277117060051
+            },
+            {
+                "feature": "growth opportunity",
+                "importance": 0.016628991734266057
+            },
+            {
+                "feature": "required knowledge",
+                "importance": 0.01645240094815827
+            },
+            {
+                "feature": "knowledge growth",
+                "importance": 0.01514590477207638
+            },
+            {
+                "feature": "skills support",
+                "importance": 0.014842564536372912
+            },
+            {
+                "feature": "team required",
+                "importance": 0.01382914869869751
+            },
+            {
+                "feature": "preferred development",
+                "importance": 0.012748911768823649
+            },
+            {
+                "feature": "team strategy",
+                "importance": 0.012730385914078952
+            }
+        ]
+    },
+    "decisiontree": {
+        "accuracy": 0.7583333333333333,
+        "precision": 0.9116022099447514,
+        "recall": 0.5612244897959183,
+        "f1": 0.6947368421052632,
+        "roc_auc": 0.8901449468676359,
+        "cv_accuracy_mean": 0.7533333333333333,
+        "cv_accuracy_std": 0.009128709291752779,
+        "top_features": [
+            {
+                "feature": "dynamic growth",
+                "importance": 0.5508469973707713
+            },
+            {
+                "feature": "strategy team",
+                "importance": 0.3723711978191452
+            },
+            {
+                "feature": "team strategy",
+                "importance": 0.0766265782461313
+            },
+            {
+                "feature": "skills dynamic",
+                "importance": 0.00015522656395236607
+            },
+            {
+                "feature": "growth support",
+                "importance": 0.0
+            },
+            {
+                "feature": "growth team",
+                "importance": 0.0
+            },
+            {
+                "feature": "innovation collaboration",
+                "importance": 0.0
+            },
+            {
+                "feature": "innovation development",
+                "importance": 0.0
+            },
+            {
+                "feature": "innovation dynamic",
+                "importance": 0.0
+            },
+            {
+                "feature": "innovation experience",
+                "importance": 0.0
+            }
+        ]
     }
 }
