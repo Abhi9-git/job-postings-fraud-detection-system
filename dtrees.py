@@ -1,8 +1,8 @@
 import pickle
 import json
-import pandas as pd
+import os
 import numpy as np
-from sklearn.model_selection import train_test_split, cross_val_score, StratifiedKFold
+from sklearn.model_selection import StratifiedGroupKFold
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -16,18 +16,19 @@ from sklearn.metrics import (
 from scipy.sparse import hstack, csr_matrix
 from pipeline_config import (
     CATEGORICAL_COLS,
-    RANDOM_STATE,
     STRUCTURED_COLS,
-    TEST_SIZE,
-    TEXT_COLS,
     TFIDF_PARAMS,
+    grafted_train_test_indices,
+    load_main_frame,
 )
 
 print("Starting training of Decision Tree Model Pipeline...")
 
-# 1. Load the cleaned data
-
-df = pd.read_csv("CleanData.csv")
+# 1. Load the grafted frame: CleanData structured fields + label-matched
+# real-world text (see pipeline_config). Never read CleanData text directly:
+# it is synthetic template salad that makes the tree a constant function.
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+df = load_main_frame(BASE_DIR)
 
 # Label encoders (columns shared with app.py via pipeline_config)
 label_encoders = {}
@@ -37,39 +38,40 @@ for col in categorical_cols:
     df[col + "_enc"] = le.fit_transform(df[col])
     label_encoders[col] = le
 
-# Text setup
-text_cols = TEXT_COLS
-df["combined_text"] = df[text_cols].apply(lambda row: " ".join(row.values.astype(str)), axis=1)
+y = df["is_fake"].astype(int).values
+groups = df["text_group"].values
 
-y = df["is_fake"]
+# Group-aware split: identical grafted texts never span train/test.
+idx_train, idx_test = grafted_train_test_indices(y, groups)
 
 # Leakage-free structured features (order shared with app.py)
 structured_cols = STRUCTURED_COLS
 
 scaler = StandardScaler()
-X_struct_scaled = scaler.fit_transform(df[structured_cols])
+X_struct_train = scaler.fit_transform(df[structured_cols].values[idx_train])
+X_struct_test = scaler.transform(df[structured_cols].values[idx_test])
 
-# Shared TF-IDF config (see pipeline_config). Do NOT hardcode a different
+# Shared TF-IDF config (see pipeline_config), fit on TRAIN rows only so
+# test text never leaks into the vocabulary/idf. Do NOT hardcode a different
 # config here: it overwrites the shared tfidf_vectorizer.pkl with an
 # incompatible vocab and breaks inference with "X has N features, but
 # DecisionTreeClassifier is expecting M".
 tfidf = TfidfVectorizer(**TFIDF_PARAMS)
-tfidf_matrix = tfidf.fit_transform(df["combined_text"])
+tfidf_train = tfidf.fit_transform(df["combined_text"].iloc[idx_train])
+tfidf_test = tfidf.transform(df["combined_text"].iloc[idx_test])
 
-X_combined = hstack([csr_matrix(X_struct_scaled), tfidf_matrix])
-assert X_combined.shape[1] == 9 + len(tfidf.vocabulary_), (
-    f"Unexpected feature width {X_combined.shape[1]}"
-)
-
-X_train, X_test, y_train, y_test = train_test_split(
-    X_combined, y, test_size=TEST_SIZE, random_state=RANDOM_STATE, stratify=y
+X_train = hstack([csr_matrix(X_struct_train), tfidf_train])
+X_test = hstack([csr_matrix(X_struct_test), tfidf_test])
+y_train, y_test = y[idx_train], y[idx_test]
+assert X_train.shape[1] == 9 + len(tfidf.vocabulary_), (
+    f"Unexpected feature width {X_train.shape[1]}"
 )
 
 clf = DecisionTreeClassifier(
     random_state=42,
-    max_depth=8,
-    min_samples_leaf=5,
-    min_samples_split=10,
+    max_depth=12,
+    min_samples_leaf=3,
+    min_samples_split=6,
     class_weight="balanced"
 )
 
@@ -79,8 +81,28 @@ clf.fit(X_train, y_train)
 y_pred = clf.predict(X_test)
 y_prob = clf.predict_proba(X_test)[:, 1]
 
-cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-cv_scores = cross_val_score(clf, X_combined, y, cv=cv, scoring="accuracy")
+# Honest 5-fold CV: fresh vectorizer+scaler per fold, folds split by
+# grafted-text group so duplicates never leak across folds.
+cv = StratifiedGroupKFold(n_splits=5, shuffle=True, random_state=42)
+cv_scores = []
+for fold_train, fold_test in cv.split(df["combined_text"], y, groups):
+    fold_tfidf = TfidfVectorizer(**TFIDF_PARAMS)
+    fold_text_train = fold_tfidf.fit_transform(df["combined_text"].iloc[fold_train])
+    fold_text_test = fold_tfidf.transform(df["combined_text"].iloc[fold_test])
+    fold_scaler = StandardScaler()
+    fold_struct_train = fold_scaler.fit_transform(df[structured_cols].values[fold_train])
+    fold_struct_test = fold_scaler.transform(df[structured_cols].values[fold_test])
+    fold_clf = DecisionTreeClassifier(
+        random_state=42, max_depth=12, min_samples_leaf=3,
+        min_samples_split=6, class_weight="balanced",
+    )
+    fold_clf.fit(
+        hstack([csr_matrix(fold_struct_train), fold_text_train]), y[fold_train]
+    )
+    cv_scores.append(fold_clf.score(
+        hstack([csr_matrix(fold_struct_test), fold_text_test]), y[fold_test]
+    ))
+cv_scores = np.array(cv_scores)
 
 metrics = {
     "decisiontree": {
@@ -90,7 +112,9 @@ metrics = {
         "f1": float(f1_score(y_test, y_pred)),
         "roc_auc": float(roc_auc_score(y_test, y_prob)),
         "cv_accuracy_mean": float(cv_scores.mean()),
-        "cv_accuracy_std": float(cv_scores.std())
+        "cv_accuracy_std": float(cv_scores.std()),
+        "n_test": int(len(y_test)),
+        "text_source": "grafted-real",
     }
 }
 

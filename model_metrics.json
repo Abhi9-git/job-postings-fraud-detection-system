@@ -1,103 +1,63 @@
 {
     "logisticregression": {
-        "accuracy": 1.0,
-        "precision": 1.0,
-        "recall": 1.0,
-        "f1": 1.0,
-        "roc_auc": 1.0,
-        "cv_accuracy_mean": 0.9996666666666666,
-        "cv_accuracy_std": 0.000666666666666682,
-        "top_features": [
-            {
-                "feature": "skills development",
-                "importance": 2.151933516238127
-            },
-            {
-                "feature": "opportunity experience",
-                "importance": 2.1339580189998983
-            },
-            {
-                "feature": "growth growth",
-                "importance": 2.0663506126335123
-            },
-            {
-                "feature": "experience collaboration",
-                "importance": 2.053492503276792
-            },
-            {
-                "feature": "experience experience",
-                "importance": 2.048933263627192
-            },
-            {
-                "feature": "paced innovation",
-                "importance": 2.0325492425540057
-            },
-            {
-                "feature": "development innovation",
-                "importance": 2.0093485753172873
-            },
-            {
-                "feature": "collaboration responsibilities",
-                "importance": 1.9953094469670962
-            },
-            {
-                "feature": "opportunity collaboration",
-                "importance": 1.9878497608513677
-            },
-            {
-                "feature": "skills innovation",
-                "importance": 1.9668814933229724
-            }
-        ]
+        "accuracy": 0.8851674641148325,
+        "precision": 0.9010989010989011,
+        "recall": 0.845360824742268,
+        "f1": 0.8723404255319149,
+        "roc_auc": 0.9500900016363933,
+        "n_test": 627,
+        "text_source": "grafted-real"
     },
     "decisiontree": {
-        "accuracy": 1.0,
-        "precision": 1.0,
-        "recall": 1.0,
-        "f1": 1.0,
-        "roc_auc": 1.0,
-        "cv_accuracy_mean": 1.0,
-        "cv_accuracy_std": 0.0,
+        "accuracy": 0.7926634768740032,
+        "precision": 0.7539432176656151,
+        "recall": 0.8213058419243986,
+        "f1": 0.7861842105263158,
+        "roc_auc": 0.7878671657666503,
+        "cv_accuracy_mean": 0.8146666666666667,
+        "cv_accuracy_std": 0.03496665077851559,
+        "n_test": 627,
+        "text_source": "grafted-real",
         "top_features": [
             {
-                "feature": "global",
-                "importance": 0.999999999999982
+                "feature": "team",
+                "importance": 0.16218243511134972
             },
             {
-                "feature": "collaboration team",
-                "importance": 1.7430501486614765e-14
+                "feature": "university",
+                "importance": 0.06686761442913965
             },
             {
-                "feature": "paced opportunity",
-                "importance": 6.661338147750831e-16
+                "feature": "service",
+                "importance": 0.05871263448963007
             },
             {
-                "feature": "global preferred",
-                "importance": 0.0
+                "feature": "dedicated",
+                "importance": 0.053205535313818726
             },
             {
-                "feature": "global required",
-                "importance": 0.0
+                "feature": "growing",
+                "importance": 0.05198742403657698
             },
             {
-                "feature": "global responsibilities",
-                "importance": 0.0
+                "feature": "large",
+                "importance": 0.04795607719217272
             },
             {
-                "feature": "global skills",
-                "importance": 0.0
+                "feature": "mobile",
+                "importance": 0.046907347523996334
             },
             {
-                "feature": "global strategy",
-                "importance": 0.0
+                "feature": "responsibilities",
+                "importance": 0.03959745054850982
             },
             {
-                "feature": "global support",
-                "importance": 0.0
+                "feature": "years",
+                "importance": 0.03459759461955192
             },
             {
-                "feature": "global team",
-                "importance": 0.0
+                "feature": "founded",
+                "importance": 0.0340569254825633
             }
         ]
     },

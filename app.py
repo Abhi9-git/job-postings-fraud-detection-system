@@ -25,6 +25,9 @@ from pipeline_config import (
     STRUCTURED_COLS,
     TEST_SIZE,
     TEXT_COLS,
+    grafted_train_test_indices,
+    load_main_frame,
+    strip_leakage_tokens,
 )
 
 app = Flask(__name__)
@@ -104,8 +107,6 @@ def _build_feature_vector(data, selected_model_name=None):
     # Collect & combine texts (order shared with training via pipeline_config)
     parts = [str(data.get(col, "") or "").strip() for col in TEXT_COLS]
     combined_text = " ".join(parts)
-
-    # NLP TF-IDF Vectorization
     if selected_model_name in ["github_rf", "github_dt"]:
         if github_vectorizer is None:
             raise ValueError("GitHub external vectorizer is not available")
@@ -115,7 +116,10 @@ def _build_feature_vector(data, selected_model_name=None):
     if tfidf_vectorizer is None:
         raise ValueError("TF-IDF vectorizer is not available")
 
-    tfidf_input = tfidf_vectorizer.transform([combined_text])
+    # NLP TF-IDF vectorization (same de-leakage as training — see pipeline_config)
+    tfidf_input = tfidf_vectorizer.transform(
+        [strip_leakage_tokens(combined_text)]
+    )
 
     # Structured inputs with safe defaults
     experience = int(data.get("required_experience_years", 0))
@@ -690,15 +694,13 @@ def model_evaluation():
     try:
         out = {}
 
-        # ---- Main pipeline models (CleanData.csv, shared TF-IDF + scaler) ----
+        # ---- Main pipeline models (grafted frame, shared TF-IDF + scaler) ----
+        # Rebuilds the exact frame/rows the training scripts used (see
+        # pipeline_config.load_main_frame) so curves match the served models.
         main_needed = [m for m in ("logisticregression", "decisiontree") if m in models]
         if main_needed and tfidf_vectorizer is not None:
-            df = pd.read_csv(os.path.join(BASE_DIR, "CleanData.csv"))
-            for col in TEXT_COLS:
-                if col not in df.columns:
-                    df[col] = ""
-            combined = df[TEXT_COLS].fillna("").agg(" ".join, axis=1)
-            tfidf_mat = tfidf_vectorizer.transform(combined)
+            df = load_main_frame(BASE_DIR)
+            tfidf_mat = tfidf_vectorizer.transform(df["combined_text"])
 
             def _enc(col, val):
                 if col not in label_encoders:
@@ -725,11 +727,9 @@ def model_evaluation():
                 struct = scaler.transform(struct)
             X_all = hstack([csr_matrix(struct), tfidf_mat])
             y_all = df["is_fake"].astype(int).values
-            # Same split as the training scripts (see pipeline_config)
-            idx = np.arange(len(y_all))
-            _, idx_test = train_test_split(
-                idx, test_size=TEST_SIZE, random_state=RANDOM_STATE,
-                stratify=y_all,
+            # Same group-aware split as the training scripts (see pipeline_config)
+            _, idx_test = grafted_train_test_indices(
+                y_all, df["text_group"].values
             )
             X_test, y_test = X_all[idx_test], y_all[idx_test]
             for name in main_needed:

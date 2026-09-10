@@ -67,9 +67,9 @@ Open 👉 [http://127.0.0.1:5000](http://127.0.0.1:5000)
 
 ## ⚙️ How Detection Works
 
-1. **NLP text vectorization** — `job_description` + `requirements` + `benefits` + `company_profile` are joined and transformed with **TF-IDF** (top 500 unigrams & bigrams) → 402 terms.
+1. **NLP text vectorization** — each training row's text is a label-matched real posting grafted from `github_fakejobs.csv` (see `load_main_frame()`), transformed with **TF-IDF** (top 2000 unigrams & bigrams) → 2000 terms.
 2. **Structured encoding** — experience, openings, telecommuting + 6 LabelEncoded categoricals (`industry`, `employment_type`, `salary_range`, `education_level`, `department`, `job_function`), StandardScaled → 9 numbers. Leakage-free by design: excludes `text_length`, gmail/logo signals.
-3. **Stacked matrix** — `scipy.sparse.hstack([structured, tfidf])` → **411 features** per posting.
+3. **Stacked matrix** — `scipy.sparse.hstack([structured, tfidf])` → **2009 features** per posting.
 4. **Classification** — the selected model returns REAL/FAKE plus calibrated confidence; every prediction is width-guarded against vectorizer/model drift.
 
 ---
@@ -78,8 +78,8 @@ Open 👉 [http://127.0.0.1:5000](http://127.0.0.1:5000)
 
 | Model | Pipeline | Notes |
 |---|---|---|
-| Logistic Regression | Shared 411-feature | Calibrated (`C=0.5`, 5-fold), linear + interpretable coefficients |
-| Decision Tree | Shared 411-feature | Balanced, `max_depth=8`, fast rule-based verdicts |
+| Logistic Regression | Shared 2009-feature | Calibrated (`C=0.5`, 5-fold), linear + interpretable coefficients |
+| Decision Tree | Shared 2009-feature | Balanced, `max_depth=12`, fast rule-based verdicts |
 | GitHub Random Forest | Text-only CountVectorizer | 200-tree ensemble on the external corpus |
 | GitHub Decision Tree | Text-only CountVectorizer | Lightweight tree on the external corpus |
 
@@ -104,4 +104,4 @@ Live ROC curves, confusion matrices and accuracy/precision/recall/F1/AUC for all
 ## 📖 Further Reading
 
 - **`documentation.md`** — full documentation: architecture, every file, deep dives, known quirks.
-- *Known quirk:* the token `global` appears in 100% of fake and 0% of real training rows, so main models can hit 1.0 by keying on it — de-leakage must be applied to both main models together (see `documentation.md`).
+- *Fixed quirk:* `CleanData` text was synthetic template salad (`global` = every fake, `company` = every real), which collapsed the decision tree to always-REAL @ 1.0 on real input. The main pipeline now trains on grafted real-world text (`load_main_frame()` in `pipeline_config.py`) — DT ~0.79 / LR ~0.89, honest (see `documentation.md`).
