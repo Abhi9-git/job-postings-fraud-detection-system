@@ -4,4 +4,5 @@ venv/
 __pycache__/
 *.pyc
 .ipynb_checkpoints/
-*.pkl
+# NOTE: model .pkl artifacts MUST be committed — Vercel builds from git
+# and app.py loads these at startup. Do not re-add *.pkl here.
